@@ -399,7 +399,7 @@ def main():
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
 
-    print("Lola bot Gemini bilan ishga tushdi...")
+    print("Lola bot Postgres bilan ishga tushdi...")
     app.run_polling(drop_pending_updates=True)
 
 
