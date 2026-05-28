@@ -317,33 +317,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
 
-    user = update.effective_user
-    chat = update.effective_chat
-    text = update.message.text or ""
-    print(
+user = update.effective_user
+chat = update.effective_chat
+text = update.message.text or ""
+
+print(
     "DEBUG:",
     "chat=", chat.type,
     "text=", text,
     "reply=", bool(update.message.reply_to_message)
 )
 
-    # Xabarlarni faqat guruhlarda sanash
-    if user and not user.is_bot and chat.type != "private":
-        full_name = user.full_name or user.username or "Noma'lum"
-        add_message_stat(chat.id, user.id, full_name)
+# Xabarlarni faqat guruhlarda sanash
+if user and not user.is_bot and chat.type != "private":
+    full_name = user.full_name or user.username or "Noma'lum"
+    add_message_stat(chat.id, user.id, full_name)
 
-    # Shaxsiy chatda javob beradi.
-    # Guruhda faqat bot xabariga reply qilinganda javob beradi.
-    should_reply = False
+# Shaxsiy chatda javob beradi.
+# Guruhda faqat reply bo'lsa javob beradi.
+should_reply = False
 
-    if chat.type == "private":
-        should_reply = True
-  else:
-   if update.message.reply_to_message:
+if chat.type == "private":
     should_reply = True
+else:
+    if update.message.reply_to_message:
+        should_reply = True
 
-    if not should_reply:
-        return
+if not should_reply:
+    return
 
     user_name = user.first_name or user.full_name or "do'stim"
 
