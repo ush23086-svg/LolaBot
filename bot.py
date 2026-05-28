@@ -332,12 +332,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if chat.type == "private":
         should_reply = True
-   else:
-    if update.message.reply_to_message and update.message.reply_to_message.from_user:
-        replied_user = update.message.reply_to_message.from_user
-
-        if replied_user.is_bot:
-            should_reply = True
+  else:
+    if update.message.reply_to_message:
+        should_reply = True
 
     if not should_reply:
         return
