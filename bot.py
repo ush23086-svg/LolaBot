@@ -320,6 +320,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chat = update.effective_chat
     text = update.message.text or ""
+    print(
+    "DEBUG:",
+    "chat=", chat.type,
+    "text=", text,
+    "reply=", bool(update.message.reply_to_message)
+)
 
     # Xabarlarni faqat guruhlarda sanash
     if user and not user.is_bot and chat.type != "private":
