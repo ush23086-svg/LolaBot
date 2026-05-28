@@ -1,4 +1,5 @@
 import os
+from openai import OpenAI
 import asyncio
 import logging
 from datetime import datetime, time, timedelta
@@ -22,6 +23,7 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 TZ = ZoneInfo("Asia/Tashkent")
 
@@ -31,6 +33,10 @@ logging.basicConfig(
 )
 
 client = genai.Client(api_key=GEMINI_API_KEY)
+hf_client = OpenAI(
+    base_url="https://router.huggingface.co/v1",
+    api_key=HF_TOKEN,
+) if HF_TOKEN else None
 
 SYSTEM_PROMPT = """
 Sen Lola ismli Telegram botisan. Sen Jasurning AI yordamchisisan.
