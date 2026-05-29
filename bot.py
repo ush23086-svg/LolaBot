@@ -319,31 +319,24 @@ async def ask_huggingface(user_text: str) -> str:
 
     return answer.strip()
 
-
 async def ask_gemini(user_text: str) -> str:
-    try:
-        if not GEMINI_API_KEY:
-            return await ask_huggingface(user_text)
+    if not GEMINI_API_KEY:
+        return "Bugun juda charchadim, keling ertaga suhbatni davom ettiraylik 😊"
 
+    try:
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=f"{SYSTEM_PROMPT}\n\nFoydalanuvchi xabari:\n{user_text}"
         )
 
         if not response.text:
-            return await ask_huggingface(user_text)
+            return "Bugun juda charchadim, keling ertaga suhbatni davom ettiraylik 😊"
 
         return response.text.strip()
 
     except Exception as e:
-        print("Gemini xatosi, Hugging Face sinab ko'riladi:", e)
-
-        try:
-            return await ask_huggingface(user_text)
-        except Exception as hf_error:
-            print("Hugging Face xatosi:", hf_error)
-            return "Bugun juda charchadim, keling ertaga suhbatni davom ettiraylik 😊"
-
+        print("Gemini xatosi:", e)
+        return "Bugun juda charchadim, keling ertaga suhbatni davom ettiraylik 😊"
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
