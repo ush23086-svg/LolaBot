@@ -32,6 +32,8 @@ logging.basicConfig(
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
+VIDEO_FILENAME = "SaveVid_Net_AQNKnUIQh4au0ukBFQeeBEE9GNtzkOFvNFXUDTipfHHr9qwI5m8RUCHhFxyUIY.mp4"
+
 SYSTEM_PROMPT = """
 Sen Lola ismli Telegram botisan. Sen Jasurning AI yordamchisisan.
 
@@ -214,6 +216,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def lola_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        with open(VIDEO_FILENAME, "rb") as video:
+            await update.message.reply_video(video=video)
+    except Exception as e:
+        print("Video yuborishda xato:", e)
+        await update.message.reply_text("😄")
+
+
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     if chat.type == "private":
@@ -292,18 +303,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as db_err:
             print("DB xatosi:", db_err)
 
+    # "kul" so'zi kelsa video yuborish
+    text_lower = text.lower()
+    if "kul" in text_lower:
+        try:
+            with open(VIDEO_FILENAME, "rb") as video:
+                await update.message.reply_video(video=video)
+        except Exception as e:
+            print("Video yuborishda xato:", e)
+        return
+
     # Shaxsiy chatda javob beradi.
     # Guruhda faqat bot xabariga reply qilinganda javob beradi.
     should_reply = False
 
     if chat.type == "private":
         should_reply = True
-    elif update.message.reply_to_message and update.message.reply_to_message.from_user:
-        if update.message.reply_to_message.from_user.id == context.bot.id:
+    else:
+        if update.message.reply_to_message:
             should_reply = True
 
     if not should_reply:
         return
+
+    user_name = user.first_name or user.full_name or "do'stim"
 
     gemini_input = (
         f"Foydalanuvchi ismi: {user_name}\n"
@@ -386,6 +409,7 @@ def main():
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("lola", lola_command))
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("week", week_command))
     app.add_handler(CommandHandler("month", month_command))
