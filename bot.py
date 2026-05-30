@@ -20,7 +20,12 @@ from telegram.ext import (
 load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_KEYS = [
+    os.getenv("GEMINI_API_KEY_1"),
+    os.getenv("GEMINI_API_KEY_2"),
+    os.getenv("GEMINI_API_KEY_3"),
+]
+GEMINI_KEYS = [key for key in GEMINI_KEYS if key]
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 TZ = ZoneInfo("Asia/Tashkent")
@@ -29,8 +34,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
-
-client = genai.Client(api_key=GEMINI_API_KEY)
 
 VIDEO_FILENAME = "SaveVid_Net_AQNKnUIQh4au0ukBFQeeBEE9GNtzkOFvNFXUDTipfHHr9qwI5m8RUCHhFxyUIY.mp4"
 
@@ -272,22 +275,26 @@ async def month_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def ask_gemini(user_text: str) -> str:
-    if not GEMINI_API_KEY:
+    if not GEMINI_KEYS:
         return "Bugun juda charchadim, keling ertaga suhbatni davom ettiraylik 😊"
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=f"{SYSTEM_PROMPT}\n\nFoydalanuvchi xabari:\n{user_text}"
-        )
-        if not response.text:
-            return "Bugun juda charchadim, keling ertaga suhbatni davom ettiraylik 😊"
-        return response.text.strip()
-    except Exception as e:
-        print("Gemini xatosi:", e)
-        error_text = str(e).lower()
-        if "429" in error_text or "quota" in error_text or "resource_exhausted" in error_text:
-            return "Bugun juda charchadim, keling ertaga suhbatni davom ettiraylik 😊"
-        return "Hozir biroz chalg'ib qoldim 😅"
+
+    for api_key in GEMINI_KEYS:
+        try:
+            temp_client = genai.Client(api_key=api_key)
+            response = temp_client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=f"{SYSTEM_PROMPT}\n\nFoydalanuvchi xabari:\n{user_text}"
+            )
+            if response.text:
+                return response.text.strip()
+        except Exception as e:
+            error_text = str(e).lower()
+            print(f"Key xatosi: {e}")
+            if "429" in error_text or "quota" in error_text:
+                continue
+            return "Hozir biroz o'ylanib qoldim 😅"
+
+    return "Bugun juda charchadim, keling ertaga suhbatni davom ettiraylik 😊"
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -404,8 +411,8 @@ def main():
     if not TELEGRAM_TOKEN:
         print("Xato: TELEGRAM_BOT_TOKEN .env faylda topilmadi")
         return
-    if not GEMINI_API_KEY:
-        print("Xato: GEMINI_API_KEY .env faylda topilmadi")
+    if not GEMINI_KEYS:
+        print("Xato: GEMINI_API_KEY_1 Railway Variables ichida topilmadi")
         return
     if not DATABASE_URL:
         print("Xato: DATABASE_URL Railway Variables ichida topilmadi")
