@@ -282,18 +282,12 @@ async def ask_gemini(user_text: str) -> str:
         if not response.text:
             return "Bugun juda charchadim, keling ertaga suhbatni davom ettiraylik 😊"
         return response.text.strip()
-except Exception as e:
-    error_text = str(e).lower()
-    print("Gemini xatosi:", e)
-
-    if "429" in error_text or "quota" in error_text:
-        return "Bugun juda charchadim, keling ertaga suhbatni davom ettiraylik 😊"
-
-    return "Hozir biroz o‘ylanib qoldim 😅"
-    if "429" in error_text or "quota" in error_text:
-        return "Bugun juda charchadim, keling ertaga suhbatni davom ettiraylik 😊"
-
-    return "Hozir biroz o‘ylanib qoldim 😅"
+    except Exception as e:
+        print("Gemini xatosi:", e)
+        error_text = str(e).lower()
+        if "429" in error_text or "quota" in error_text or "resource_exhausted" in error_text:
+            return "Bugun juda charchadim, keling ertaga suhbatni davom ettiraylik 😊"
+        return "Hozir biroz chalg'ib qoldim 😅"
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
