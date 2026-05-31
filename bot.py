@@ -1,6 +1,8 @@
 import os
 import asyncio
 import logging
+import requests
+from bs4 import BeautifulSoup
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -221,6 +223,33 @@ def format_stats(title: str, total: int, rows) -> str:
     return text
 
 
+def get_warzone_meta():
+    try:
+        url = "https://codmunity.gg/meta-ranking"
+        response = requests.get(url)
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        text = soup.get_text()
+
+        metas = []
+
+        if "MK.78" in text:
+            metas.append("MK.78")
+
+        if "KOGOT-7" in text:
+            metas.append("KOGOT-7")
+
+        if "STRIDER 300" in text:
+            metas.append("STRIDER 300")
+
+        return metas
+
+    except Exception as e:
+        print("Meta olish xatosi:", e)
+        return []
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
         await update.message.reply_text("Salom 😊 Bemalol yozing.")
@@ -334,7 +363,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print("Video yuborishda xato:", e)
         return
+        
+        # "meta" so'zi kelsa warzone meta ko'rsatish
+if "meta" in text_lower:
+    metas = get_warzone_meta()
 
+    if metas:
+        await update.message.reply_text(
+            f"Hozirgi top meta qurollar: {', '.join(metas)} 😄"
+        )
+    else:
+        await update.message.reply_text(
+            "Meta olishda muammo bo‘ldi 😅"
+        )
+
+    return
+    
     # Shaxsiy chatda javob beradi.
     # Guruhda faqat bot xabariga reply qilinganda javob beradi.
     should_reply = False
