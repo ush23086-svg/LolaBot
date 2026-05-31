@@ -95,15 +95,15 @@ Qattiq taqiqlar:
 - Savolga aloqasi yo'q javob berma.
 - Har safar bir xil iboralarni ishlatma.
 
-Qo'shimcha
--Telegramdagi oddiy odamdek gaplash.
--Juda rasmiy gapirma.
--Qisqa va tabiiy javob ber.
--Foydalanuvchi qisqa yozsa ham kontekstni tushunishga harakat qil.
--Har safar "Aniqroq ayting" deb yozma.
--Agar suhbat konteksti tushunarli bo‘lsa, o‘zing davom ettir.
--Agar foydalanuvchi "qaysilar", "nega", "qanaqa", "keyinchi", "chi", "rostdanmi", "ha", "yo'q" kabi qisqa davomiy savollar bersa, oldingi suhbat kontekstiga qarab javob ber.
--Warzone, COD, o‘yinlar, qurol sborkalari haqida yaxshi tushunchang bor.
+Qo'shimcha:
+- Telegramdagi oddiy odamdek gaplash.
+- Juda rasmiy gapirma.
+- Qisqa va tabiiy javob ber.
+- Foydalanuvchi qisqa yozsa ham kontekstni tushunishga harakat qil.
+- Har safar "Aniqroq ayting" deb yozma.
+- Agar suhbat konteksti tushunarli bo'lsa, o'zing davom ettir.
+- Agar foydalanuvchi "qaysilar", "nega", "qanaqa", "keyinchi", "chi", "rostdanmi", "ha", "yo'q" kabi qisqa davomiy savollar bersa, oldingi suhbat kontekstiga qarab javob ber.
+- Warzone, COD, o'yinlar, qurol sborkalari haqida yaxshi tushunchang bor.
 """
 
 
@@ -217,19 +217,25 @@ def format_stats(title: str, total: int, rows) -> str:
     text = f"📊 {title}:\n\nJami xabarlar: {total} ta\n\n"
     text += "Eng faol ishtirokchilar:\n"
     medals = ["🥇", "🥈", "🥉"]
+
     for i, row in enumerate(rows[:3]):
         medal = medals[i] if i < 3 else "•"
         text += f"{medal} {row['user_name']} ({row['count']} ta)\n"
+
     return text
 
 
 def get_warzone_meta():
     try:
         url = "https://codmunity.gg/meta-ranking"
-        response = requests.get(url)
+        headers = {
+            "User-Agent": "Mozilla/5.0"
+        }
+
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "html.parser")
-
         text = soup.get_text()
 
         metas = []
@@ -271,13 +277,17 @@ async def lola_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
+
     if chat.type == "private":
         await update.message.reply_text("Statistika faqat guruhlar uchun ishlaydi 😊")
         return
+
     rows = get_stats(chat.id, today_key())
+
     if not rows:
         await update.message.reply_text("Bugun hali statistika yo'q.")
         return
+
     total = sum(row["count"] for row in rows)
     text = format_stats("Bugungi statistika", total, rows)
     await update.message.reply_text(text)
@@ -285,15 +295,19 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def week_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
+
     if chat.type == "private":
         await update.message.reply_text("Haftalik statistika faqat guruhlar uchun ishlaydi 😊")
         return
+
     today = today_key()
     start_day = today - timedelta(days=today.weekday())
     rows = get_stats_range(chat.id, start_day, today)
+
     if not rows:
         await update.message.reply_text("Bu hafta hali statistika yo'q.")
         return
+
     total = sum(row["count"] for row in rows)
     text = format_stats("Haftalik statistika", total, rows)
     await update.message.reply_text(text)
@@ -301,15 +315,19 @@ async def week_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def month_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
+
     if chat.type == "private":
         await update.message.reply_text("Oylik statistika faqat guruhlar uchun ishlaydi 😊")
         return
+
     today = today_key()
     start_day = today.replace(day=1)
     rows = get_stats_range(chat.id, start_day, today)
+
     if not rows:
         await update.message.reply_text("Bu oy hali statistika yo'q.")
         return
+
     total = sum(row["count"] for row in rows)
     text = format_stats("Oylik statistika", total, rows)
     await update.message.reply_text(text)
@@ -326,13 +344,17 @@ async def ask_gemini(user_text: str) -> str:
                 model="gemini-2.5-flash",
                 contents=f"{SYSTEM_PROMPT}\n\nFoydalanuvchi xabari:\n{user_text}"
             )
+
             if response.text:
                 return response.text.strip()
+
         except Exception as e:
             error_text = str(e).lower()
             print(f"Key xatosi: {e}")
-            if "429" in error_text or "quota" in error_text:
+
+            if "429" in error_text or "quota" in error_text or "resource_exhausted" in error_text:
                 continue
+
             return "Hozir biroz o'ylanib qoldim 😅"
 
     return "Bugun juda charchadim, keling ertaga suhbatni davom ettiraylik 😊"
@@ -345,6 +367,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chat = update.effective_chat
     text = update.message.text or ""
+    text_lower = text.lower()
 
     # Xabarlarni faqat guruhlarda sanash
     if user and not user.is_bot and chat.type != "private":
@@ -355,30 +378,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print("DB xatosi:", db_err)
 
     # "kul" so'zi kelsa video yuborish
-    text_lower = text.lower()
     if "kul" in text_lower:
         try:
             with open(VIDEO_FILENAME, "rb") as video:
                 await update.message.reply_video(video=video)
         except Exception as e:
             print("Video yuborishda xato:", e)
+            await update.message.reply_text("😄")
         return
-        
-        # "meta" so'zi kelsa warzone meta ko'rsatish
-if "meta" in text_lower:
-    metas = get_warzone_meta()
 
-    if metas:
-        await update.message.reply_text(
-            f"Hozirgi top meta qurollar: {', '.join(metas)} 😄"
-        )
-    else:
-        await update.message.reply_text(
-            "Meta olishda muammo bo‘ldi 😅"
-        )
+    # "meta" so'zi kelsa Warzone meta ko'rsatish
+    if "meta" in text_lower:
+        metas = get_warzone_meta()
 
-    return
-    
+        if metas:
+            await update.message.reply_text(
+                f"Hozirgi top meta qurollar: {', '.join(metas)} 😄"
+            )
+        else:
+            await update.message.reply_text(
+                "Meta olishda muammo bo'ldi 😅"
+            )
+        return
+
     # Shaxsiy chatda javob beradi.
     # Guruhda faqat bot xabariga reply qilinganda javob beradi.
     should_reply = False
@@ -406,6 +428,7 @@ if "meta" in text_lower:
     except Exception as e:
         print("Gemini javob xatosi:", e)
         error_text = str(e).lower()
+
         if "429" in error_text or "quota" in error_text or "resource_exhausted" in error_text:
             await update.message.reply_text(
                 "Bugun juda charchadim, keling ertaga suhbatni davom ettiraylik 😊"
@@ -420,40 +443,54 @@ async def send_daily_report(app):
     while True:
         now = datetime.now(TZ)
         target = datetime.combine(now.date(), time(8, 0), tzinfo=TZ)
+
         if now >= target:
             target = target + timedelta(days=1)
+
         wait_seconds = (target - now).total_seconds()
         await asyncio.sleep(wait_seconds)
 
         report_day = today_key()
         stat_day = yesterday_key()
-        chat_ids = get_all_chat_ids()
+
+        try:
+            chat_ids = get_all_chat_ids()
+        except Exception as e:
+            print("Chat ID olishda xato:", e)
+            continue
 
         for chat_id in chat_ids:
-            if was_report_sent(chat_id, report_day):
-                continue
-            rows = get_stats(chat_id, stat_day)
-            if not rows:
-                continue
-            total = sum(row["count"] for row in rows)
             try:
-                chat_info = await app.bot.get_chat(int(chat_id))
-                group_name = chat_info.title or "guruh"
-            except Exception:
-                group_name = "guruh"
+                if was_report_sent(chat_id, report_day):
+                    continue
 
-            text = f"⏰ Hayrli tong, {group_name}!\n\n"
-            text += f"Kecha chatga jami {total} ta xabar yuborildi.\n\n"
-            text += "Eng faol ishtirokchilar:\n"
-            medals = ["🥇", "🥈", "🥉"]
-            for i, row in enumerate(rows[:3]):
-                medal = medals[i] if i < 3 else "•"
-                text += f"{medal} {row['user_name']} ({row['count']} ta)\n"
-            text += "\n💬 Men bilan suhbatlashish uchun mening xabarimga reply qiling."
+                rows = get_stats(chat_id, stat_day)
 
-            try:
+                if not rows:
+                    continue
+
+                total = sum(row["count"] for row in rows)
+
+                try:
+                    chat_info = await app.bot.get_chat(int(chat_id))
+                    group_name = chat_info.title or "guruh"
+                except Exception:
+                    group_name = "guruh"
+
+                text = f"⏰ Hayrli tong, {group_name}!\n\n"
+                text += f"Kecha chatga jami {total} ta xabar yuborildi.\n\n"
+                text += "Eng faol ishtirokchilar:\n"
+
+                medals = ["🥇", "🥈", "🥉"]
+                for i, row in enumerate(rows[:3]):
+                    medal = medals[i] if i < 3 else "•"
+                    text += f"{medal} {row['user_name']} ({row['count']} ta)\n"
+
+                text += "\n💬 Men bilan suhbatlashish uchun mening xabarimga reply qiling."
+
                 await app.bot.send_message(chat_id=int(chat_id), text=text)
                 mark_report_sent(chat_id, report_day)
+
             except Exception as e:
                 print("Hisobot yuborishda xato:", e)
 
@@ -467,14 +504,17 @@ def main():
     if not TELEGRAM_TOKEN:
         print("Xato: TELEGRAM_BOT_TOKEN .env faylda topilmadi")
         return
+
     if not GEMINI_KEYS:
         print("Xato: GEMINI_API_KEY_1 Railway Variables ichida topilmadi")
         return
+
     if not DATABASE_URL:
         print("Xato: DATABASE_URL Railway Variables ichida topilmadi")
         return
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("lola", lola_command))
     app.add_handler(CommandHandler("stats", stats_command))
