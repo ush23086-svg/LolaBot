@@ -100,6 +100,7 @@ Qo'shimcha
 -Foydalanuvchi qisqa yozsa ham kontekstni tushunishga harakat qil.
 -Har safar "Aniqroq ayting" deb yozma.
 -Agar suhbat konteksti tushunarli bo‘lsa, o‘zing davom ettir.
+-Agar foydalanuvchi "qaysilar", "nega", "qanaqa", "keyinchi", "chi", "rostdanmi", "ha", "yo'q" kabi qisqa davomiy savollar bersa, oldingi suhbat kontekstiga qarab javob ber.
 -Warzone, COD, o‘yinlar, qurol sborkalari haqida yaxshi tushunchang bor.
 """
 
