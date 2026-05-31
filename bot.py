@@ -53,6 +53,12 @@ WEAPON_CLASSES = {
     "assault rifle", "smg", "lmg", "sniper rifle", "marksman rifle",
     "shotgun", "battle rifle", "pistol", "melee", "launcher",
 }
+SKIP_META_NAMES = {
+    "metasharingcodes", "profavorites", "warzoneabsolutemeta",
+    "warzonemeta", "warzonemetacontenders", "mw3absolutemeta",
+    "mw3meta", "mw3metacontenders", "easescore", "good",
+    "viable", "other", "loadout", "attachments",
+}
 ATTACHMENT_SLOTS = {
     "muzzle": "Duzgich",
     "barrel": "Stvol",
@@ -240,6 +246,23 @@ def clean_line(line: str) -> str:
     return re.sub(r"\s+", " ", line)
 
 
+def is_numberish(value: str) -> bool:
+    value = value.strip()
+    return bool(re.fullmatch(r"\d+(?:\.\d+)?%?(?:\s*Pick)?", value, re.IGNORECASE))
+
+
+def valid_weapon_name(value: str) -> bool:
+    normalized = normalize_text(value)
+    lowered = value.lower()
+    if not normalized or normalized in SKIP_META_NAMES:
+        return False
+    if lowered in LOADOUT_TYPES or lowered in WEAPON_CLASSES:
+        return False
+    if CODE_RE.match(value) or PICK_RE.search(value) or is_numberish(value):
+        return False
+    return bool(re.search(r"[A-Za-z]", value))
+
+
 def codmunity_lines(url: str):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -277,6 +300,10 @@ def parse_meta_page(game: str, limit: int = 10):
     start = next((i for i, line in enumerate(lines) if title.lower() in line.lower()), None)
     if start is None:
         start = next((i for i, line in enumerate(lines) if fallback_title.lower() in line.lower()), 0)
+
+    code_weapons = parse_meta_codes(lines, game, start, limit)
+    if code_weapons:
+        return code_weapons
 
     weapons = []
     seen = set()
@@ -336,6 +363,51 @@ def parse_meta_page(game: str, limit: int = 10):
             })
 
         i = block_end
+
+    return weapons
+
+
+def parse_meta_codes(lines, game: str, start: int, limit: int):
+    weapons = []
+    seen = set()
+
+    for i, line in enumerate(lines[start:], start=start):
+        if not CODE_RE.match(line):
+            continue
+
+        code = line
+        loadout_type = ""
+        weapon_name = ""
+
+        for j in range(i - 1, max(start - 1, i - 8), -1):
+            candidate = lines[j].strip()
+            lowered = candidate.lower()
+            if not loadout_type and lowered in LOADOUT_TYPES:
+                loadout_type = candidate
+                continue
+            if valid_weapon_name(candidate):
+                weapon_name = candidate
+                break
+
+        if not weapon_name:
+            continue
+
+        key = normalize_text(weapon_name)
+        if key in seen:
+            continue
+
+        seen.add(key)
+        weapons.append({
+            "game": game,
+            "name": weapon_name,
+            "category": "",
+            "type": loadout_type,
+            "pick": "",
+            "code": code,
+        })
+
+        if len(weapons) >= limit:
+            break
 
     return weapons
 
@@ -408,10 +480,12 @@ def find_selected_weapon(text: str, weapons):
 
     for weapon in weapons:
         name = normalize_text(weapon["name"])
+        loadout_type = normalize_text(weapon.get("type", ""))
         name_without_digits = re.sub(r"\d+", "", name)
         if (
             user_text in name
             or name in user_text
+            or (loadout_type and loadout_type in user_text)
             or (name_without_digits and name_without_digits in user_text)
         ):
             return weapon
