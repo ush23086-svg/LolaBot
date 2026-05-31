@@ -41,7 +41,8 @@ CODMUNITY_URLS = {
 }
 
 CODE_RE = re.compile(r"^[A-Z0-9]{2,}(?:-[A-Z0-9]{2,}){1,}$")
-RANK_RE = re.compile(r"^\s*(\d+)\.\s*(?:#+\s*)?(.+)?$")
+RANK_WITH_NAME_RE = re.compile(r"^\s*(\d+)\.\s+(?:#+\s*)?(.+)$")
+RANK_ONLY_RE = re.compile(r"^\s*(\d+)\.\s*$")
 PICK_RE = re.compile(r"\d+(?:\.\d+)?%\s*Pick", re.IGNORECASE)
 
 LOADOUT_TYPES = {
@@ -251,14 +252,20 @@ def codmunity_lines(url: str):
 
 
 def ranked_name(lines, index):
-    match = RANK_RE.match(lines[index])
-    if not match:
+    match = RANK_WITH_NAME_RE.match(lines[index])
+    if match:
+        return match.group(2).replace("###", "").strip()
+
+    match = RANK_ONLY_RE.match(lines[index])
+    if not match or index + 1 >= len(lines):
         return None
-    name = (match.group(2) or "").strip()
-    if name:
-        return name.replace("###", "").strip()
+
+    name = lines[index + 1].replace("###", "").strip()
+    lowered = name.lower().strip("# ")
+    if lowered in {"good", "viable", "other"} or "meta" in lowered:
+        return None
     if index + 1 < len(lines):
-        return lines[index + 1].replace("###", "").strip()
+        return name
     return None
 
 
@@ -276,7 +283,15 @@ def parse_meta_page(game: str, limit: int = 10):
     i = start + 1
     while i < len(lines) and len(weapons) < limit:
         line = lines[i]
-        if i > start + 1 and line.startswith("##") and "Meta" in line:
+        section_name = line.lower().strip("# ")
+        if i > start + 1 and section_name in {
+            fallback_title.lower(),
+            f"{fallback_title.lower()} contenders",
+            "good",
+            "viable",
+            "other / niche / legacy weapons",
+            "meta sharing codes",
+        }:
             break
 
         name = ranked_name(lines, i)
@@ -285,8 +300,20 @@ def parse_meta_page(game: str, limit: int = 10):
             continue
 
         block_end = i + 1
-        while block_end < len(lines) and not RANK_RE.match(lines[block_end]):
-            if lines[block_end].startswith("##") and "Meta" in lines[block_end]:
+        while (
+            block_end < len(lines)
+            and not RANK_WITH_NAME_RE.match(lines[block_end])
+            and not RANK_ONLY_RE.match(lines[block_end])
+        ):
+            block_section = lines[block_end].lower().strip("# ")
+            if block_section in {
+                fallback_title.lower(),
+                f"{fallback_title.lower()} contenders",
+                "good",
+                "viable",
+                "other / niche / legacy weapons",
+                "meta sharing codes",
+            }:
                 break
             block_end += 1
 
