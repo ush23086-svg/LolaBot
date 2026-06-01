@@ -1,6 +1,5 @@
 import os
 import re
-import random
 import asyncio
 import logging
 import requests
@@ -255,7 +254,6 @@ def remember_dialog(context: ContextTypes.DEFAULT_TYPE, speaker: str, text: str)
 def build_gemini_input(context: ContextTypes.DEFAULT_TYPE, user_name: str, text: str) -> str:
     dialog = context.chat_data.get("dialog_history", [])
     recent_group = context.chat_data.get("recent_group_messages", [])
-
     parts = []
     if dialog:
         parts.append("Oldingi suhbat:\n" + "\n".join(dialog[-MAX_DIALOG_HISTORY:]))
@@ -324,11 +322,9 @@ def ranked_name(lines, index):
         if not valid_weapon_name(candidate):
             return None
         return candidate
-
     match = RANK_ONLY_RE.match(lines[index])
     if not match or index + 1 >= len(lines):
         return None
-
     name = lines[index + 1].replace("###", "").strip()
     lowered = name.lower().strip("# ")
     if lowered in {"good", "viable", "other"} or "meta" in lowered:
@@ -360,10 +356,7 @@ def parse_meta_page(game: str, limit: int = 3):
         if i > start + 1 and section_name in {
             fallback_title.lower(),
             f"{fallback_title.lower()} contenders",
-            "good",
-            "viable",
-            "other / niche / legacy weapons",
-            "meta sharing codes",
+            "good", "viable", "other / niche / legacy weapons", "meta sharing codes",
         }:
             break
 
@@ -382,10 +375,7 @@ def parse_meta_page(game: str, limit: int = 3):
             if block_section in {
                 fallback_title.lower(),
                 f"{fallback_title.lower()} contenders",
-                "good",
-                "viable",
-                "other / niche / legacy weapons",
-                "meta sharing codes",
+                "good", "viable", "other / niche / legacy weapons", "meta sharing codes",
             }:
                 break
             block_end += 1
@@ -400,14 +390,9 @@ def parse_meta_page(game: str, limit: int = 3):
         if key not in seen:
             seen.add(key)
             weapons.append({
-                "game": game,
-                "name": name,
-                "category": category,
-                "type": loadout_type,
-                "pick": pick,
-                "code": code,
+                "game": game, "name": name, "category": category,
+                "type": loadout_type, "pick": pick, "code": code,
             })
-
         i = block_end
 
     return weapons
@@ -444,12 +429,8 @@ def parse_meta_codes(lines, game: str, start: int, limit: int):
 
         seen.add(key)
         weapons.append({
-            "game": game,
-            "name": weapon_name,
-            "category": "",
-            "type": loadout_type,
-            "pick": "",
-            "code": code,
+            "game": game, "name": weapon_name, "category": "",
+            "type": loadout_type, "pick": "", "code": code,
         })
 
         if len(weapons) >= limit:
@@ -472,10 +453,7 @@ def get_weapon_loadout(game: str, weapon_name: str):
         name = lines[i]
         slot = lines[i + 1].lower()
         if slot in ATTACHMENT_SLOTS:
-            attachments.append({
-                "slot": ATTACHMENT_SLOTS[slot],
-                "name": name,
-            })
+            attachments.append({"slot": ATTACHMENT_SLOTS[slot], "name": name})
             i += 2
             continue
         if name in {"Loadout Description", "Last Updated:", "Time To Kill"}:
@@ -492,24 +470,14 @@ def is_russian_request(text: str) -> bool:
 
 def requested_game(text: str) -> str:
     value = text.lower()
-    if (
-        "mw3" in value
-        or "modern warfare 3" in value
-        or "modern warfare3" in value
-        or "modern warfare" in value
-    ):
+    if "mw3" in value or "modern warfare" in value:
         return "mw3"
     return "warzone"
 
 
 def explicit_game_request(text: str):
     value = text.lower()
-    if (
-        "mw3" in value
-        or "modern warfare 3" in value
-        or "modern warfare3" in value
-        or "modern warfare" in value
-    ):
+    if "mw3" in value or "modern warfare" in value:
         return "mw3"
     if "warzone" in value:
         return "warzone"
@@ -520,7 +488,6 @@ def wants_meta(text: str) -> bool:
     value = text.lower()
     if any(word in value for word in ["xato", "nima bu", "pishdi", "odamga o'xshab", "odamga oxshab"]):
         return False
-
     has_meta_word = "meta" in value or "мета" in value
     has_game_word = any(word in value for word in ["warzone", "cod", "mw3", "modern warfare"])
     has_weapon_word = any(word in value for word in [
@@ -576,8 +543,7 @@ def find_selected_weapon(text: str, weapons):
         loadout_type = normalize_text(weapon.get("type", ""))
         name_without_digits = re.sub(r"\d+", "", name)
         if (
-            user_text in name
-            or name in user_text
+            user_text in name or name in user_text
             or (loadout_type and loadout_type in user_text)
             or (name_without_digits and name_without_digits in user_text)
         ):
@@ -624,12 +590,10 @@ def format_weapon_answer(weapon, attachments, user_text: str):
 
     if code:
         return f"Mana {weapon['name']} qurolining sborka kodi: {code}"
-
     if attachments:
         rows = "\n".join(f"* {item['slot']}: {item['name']}" for item in attachments)
         weapon_type = weapon.get("type") or "meta"
         return f"{weapon_type} uchun {weapon['name']} yaxshi qurol. Mana uning sborkasi:\n\n{rows}"
-
     return f"{weapon['name']} uchun CODMunitydan sborka topa olmadim."
 
 
@@ -649,9 +613,7 @@ async def ask_gemini(user_text: str) -> str:
         except Exception as e:
             error_text = str(e).lower()
             print("Gemini key xatosi:", e)
-            if "429" in error_text or "quota" in error_text or "resource_exhausted" in error_text:
-                continue
-            return "Hozir biroz o'ylanib qoldim 😅"
+            continue  # barcha xatolikda keyingi keyni sinab ko'r
 
     return "Bugun juda charchadim, keling ertaga suhbatni davom ettiraylik 😊"
 
