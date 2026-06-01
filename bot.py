@@ -13,7 +13,6 @@ from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 from google import genai
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -37,6 +36,8 @@ GEMINI_KEYS = [key for key in GEMINI_KEYS if key]
 TZ = ZoneInfo("Asia/Tashkent")
 VIDEO_FILENAME = "SaveVid_Net_AQNKnUIQh4au0ukBFQeeBEE9GNtzkOFvNFXUDTipfHHr9qwI5m8RUCHhFxyUIY.mp4"
 VIDEO_SONG2_FILENAME = "video_2026-05-31_21-36-53.mp4"
+MAX_DIALOG_HISTORY = 12
+MAX_GROUP_CONTEXT = 60
 
 CODMUNITY_BASE = "https://codmunity.gg"
 CODMUNITY_URLS = {
@@ -63,10 +64,7 @@ SKIP_META_NAMES = {
     "mw3meta", "mw3metacontenders", "easescore", "good",
     "viable", "other", "loadout", "attachments", "pick",
 }
-
-# "Top X ..." kabi satrlarni o'tkazib yuborish
 TOP_N_RE = re.compile(r"^top\s+\d+", re.IGNORECASE)
-
 ATTACHMENT_SLOTS = {
     "muzzle": "Duzgich",
     "barrel": "Stvol",
@@ -79,12 +77,6 @@ ATTACHMENT_SLOTS = {
     "ammunition": "O'q-dori",
     "conversion kit": "Conversion kit",
 }
-
-# Tanlash uchun variantlar (1$ / BTS)
-CHOICE_OPTIONS = [
-    ("1$", "choice_1dollar"),
-    ("BTS", "choice_bts"),
-]
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -125,6 +117,11 @@ Warzone va COD:
 - Yo'q qurol, kod yoki sborkani o'ylab topma.
 - Agar ishonching bo'lmasa: "buni tekshirish kerak" deb ayt.
 - Warzone guruhi so'ralsa: "Warzone o'ynaydiganlar uchun guruh: @Warzone_uzbekistan" deb javob ber.
+
+Kontekst:
+- Foydalanuvchi "nomlari bilan sanab ber", "nega", "qaysilar", "to'g'rimi", "xato" kabi davomiy savol bersa, oldingi suhbat kontekstiga qarab javob ber.
+- Guruhda odamlar bahslashgan bo'lsa va "Lola to'g'rimi?" desa, oxirgi yozishmalarni tahlil qilib, urushtirmasdan xolis javob ber.
+- Bilmasang yoki kontekst yetmasa, "buni aniq bilmayman" deb ayt.
 
 Taqiqlar:
 - "Men AI botman" deb yozma.
@@ -238,6 +235,36 @@ def get_all_chat_ids():
             return [row["chat_id"] for row in cur.fetchall()]
 
 
+def remember_limited(context: ContextTypes.DEFAULT_TYPE, key: str, value: str, limit: int):
+    items = context.chat_data.setdefault(key, [])
+    items.append(value)
+    if len(items) > limit:
+        del items[:-limit]
+
+
+def remember_group_message(context: ContextTypes.DEFAULT_TYPE, user_name: str, text: str):
+    if text.strip():
+        remember_limited(context, "recent_group_messages", f"{user_name}: {text.strip()}", MAX_GROUP_CONTEXT)
+
+
+def remember_dialog(context: ContextTypes.DEFAULT_TYPE, speaker: str, text: str):
+    if text.strip():
+        remember_limited(context, "dialog_history", f"{speaker}: {text.strip()}", MAX_DIALOG_HISTORY)
+
+
+def build_gemini_input(context: ContextTypes.DEFAULT_TYPE, user_name: str, text: str) -> str:
+    dialog = context.chat_data.get("dialog_history", [])
+    recent_group = context.chat_data.get("recent_group_messages", [])
+
+    parts = []
+    if dialog:
+        parts.append("Oldingi suhbat:\n" + "\n".join(dialog[-MAX_DIALOG_HISTORY:]))
+    if recent_group:
+        parts.append("Guruhdagi oxirgi yozishmalar:\n" + "\n".join(recent_group[-20:]))
+    parts.append(f"Foydalanuvchi ismi: {user_name}\nXabar: {text}")
+    return "\n\n".join(parts)
+
+
 def format_stats(title: str, total: int, rows) -> str:
     text = f"📊 {title}:\n\nJami xabarlar: {total} ta\n\nEng faol ishtirokchilar:\n"
     medals = ["🥇", "🥈", "🥉"]
@@ -272,7 +299,6 @@ def valid_weapon_name(value: str) -> bool:
         return False
     if lowered in LOADOUT_TYPES or lowered in WEAPON_CLASSES:
         return False
-    # "Top X ..." kabi satrlarni o'tkazib yuborish
     if TOP_N_RE.match(lowered):
         return False
     if CODE_RE.match(value) or PICK_RE.search(value) or is_numberish(value):
@@ -466,21 +492,42 @@ def is_russian_request(text: str) -> bool:
 
 def requested_game(text: str) -> str:
     value = text.lower()
-    # MW3 / Modern Warfare 3 / Modern Warfare (raqamsiz ham)
     if (
         "mw3" in value
         or "modern warfare 3" in value
         or "modern warfare3" in value
-        or "modernwarfare" in value
-        or re.search(r"modern\s*warfare", value)
+        or "modern warfare" in value
     ):
         return "mw3"
     return "warzone"
 
 
+def explicit_game_request(text: str):
+    value = text.lower()
+    if (
+        "mw3" in value
+        or "modern warfare 3" in value
+        or "modern warfare3" in value
+        or "modern warfare" in value
+    ):
+        return "mw3"
+    if "warzone" in value:
+        return "warzone"
+    return None
+
+
 def wants_meta(text: str) -> bool:
     value = text.lower()
-    return any(word in value for word in ["meta", "мета", "sborka", "сбор", "loadout", "kod", "код"])
+    if any(word in value for word in ["xato", "nima bu", "pishdi", "odamga o'xshab", "odamga oxshab"]):
+        return False
+
+    has_meta_word = "meta" in value or "мета" in value
+    has_game_word = any(word in value for word in ["warzone", "cod", "mw3", "modern warfare"])
+    has_weapon_word = any(word in value for word in [
+        "qurol", "qurollar", "oruja", "oruj", "оруж", "sborka",
+        "сбор", "loadout", "kod", "код",
+    ])
+    return has_meta_word and (has_game_word or has_weapon_word)
 
 
 def wants_only_code(text: str) -> bool:
@@ -490,12 +537,21 @@ def wants_only_code(text: str) -> bool:
 
 def wants_song(text: str) -> bool:
     value = text.lower()
-    return any(word in value for word in ["qo'shiq", "qoshiq", "qo'shi", "ashula", "song", "music", "musiqa"])
+    return any(phrase in value for phrase in [
+        "qo'shiq ayt", "qoshiq ayt", "ashula ayt", "kuylab ber",
+        "qo'shiq tashla", "qoshiq tashla", "song ayt",
+    ])
 
 
 def wants_choice(text: str) -> bool:
     value = text.lower()
-    return "1$" in value or "1 $" in value or "bts" in value
+    has_money = "1$" in value or "1 $" in value
+    has_bts = bool(re.search(r"\bbts\b", value))
+    return has_money and has_bts
+
+
+def only_number_request(text: str) -> bool:
+    return bool(re.fullmatch(r"\s*\d+\s*(?:chi|chisi|chisiniki)?\s*", text.lower()))
 
 
 def find_selected_weapon(text: str, weapons):
@@ -531,7 +587,7 @@ def find_selected_weapon(text: str, weapons):
 
 def format_meta_list(weapons, ru: bool = False):
     if ru:
-        text = "Топ-3 мета-оружия прямо сейчас:\n\n"
+        text = "Вот Top-3 мета-оружия:\n\n"
         for i, weapon in enumerate(weapons, 1):
             details = " - ".join(x for x in [weapon["type"], weapon["pick"]] if x)
             text += f"{i}. {weapon['name']}"
@@ -671,10 +727,14 @@ async def month_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_meta(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
-    game = requested_game(text)
+    explicit_game = explicit_game_request(text)
+    asks_new_meta_list = explicit_game is not None or (
+        wants_meta(text) and ("meta" in text.lower() or "мета" in text.lower())
+    )
+    game = explicit_game or context.chat_data.get("last_meta_game") or requested_game(text)
     ru = is_russian_request(text)
     saved = context.chat_data.get("last_meta_weapons", [])
-    selected = find_selected_weapon(text, saved)
+    selected = None if asks_new_meta_list else find_selected_weapon(text, saved)
 
     if selected:
         attachments = []
@@ -710,49 +770,40 @@ async def handle_meta(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
         return
 
     context.chat_data["last_meta_weapons"] = weapons
-    await update.message.reply_text(format_meta_list(weapons, ru))
+    context.chat_data["last_meta_game"] = game
+    await update.message.reply_text(format_meta_list(weapons[:3], ru))
 
 
 async def handle_song(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Birinchi yoki ikkinchi qo'shiq so'ralsa — inline tugmalar chiqaradi."""
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🎵 1-qo'shiq", callback_data="song_1"),
-            InlineKeyboardButton("🎵 2-qo'shiq", callback_data="song_2"),
-        ]
-    ])
-    await update.message.reply_text("Qaysi qo'shiqni yuboray?", reply_markup=keyboard)
+    try:
+        with open(VIDEO_SONG2_FILENAME, "rb") as video:
+            await update.message.reply_video(video=video)
+    except Exception as e:
+        print("Qo'shiq videosini yuborishda xato:", e)
+        await update.message.reply_text("Qo'shiq videosini topa olmadim 😅")
 
 
 async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """1$ yoki BTS so'ralganda bot o'zi tasodifiy tanlaydi."""
-    choice = random.choice(["1$", "BTS"])
-    await update.message.reply_text(choice)
+    await update.message.reply_text("1$")
 
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    data = query.data
+    if query.data == "song_1":
+        filename = VIDEO_FILENAME
+    elif query.data == "song_2":
+        filename = VIDEO_SONG2_FILENAME
+    else:
+        return
 
-    if data == "song_1":
-        try:
-            with open(VIDEO_FILENAME, "rb") as video:
-                await query.message.reply_video(video=video)
-        except Exception as e:
-            print("1-qo'shiq yuborishda xato:", e)
-            await query.message.reply_text("Videoni topa olmadim 😅")
-
-    elif data == "song_2":
-        try:
-            with open(VIDEO_SONG2_FILENAME, "rb") as video:
-                await query.message.reply_video(video=video)
-        except Exception as e:
-            print("2-qo'shiq yuborishda xato:", e)
-            await query.message.reply_text("Videoni topa olmadim 😅")
-
-
+    try:
+        with open(filename, "rb") as video:
+            await query.message.reply_video(video=video)
+    except Exception as e:
+        print("Qo'shiq videosini yuborishda xato:", e)
+        await query.message.reply_text("Videoni topa olmadim 😅")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -763,13 +814,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     text = update.message.text or update.message.caption or ""
     text_lower = text.lower()
+    user_name = user.first_name or user.full_name or "do'stim"
 
     if user and not user.is_bot and chat.type != "private":
         full_name = user.full_name or user.username or "Noma'lum"
+        remember_group_message(context, full_name, text)
         try:
             add_message_stat(chat.id, user.id, full_name)
         except Exception as db_err:
             print("DB xatosi:", db_err)
+    elif user and not user.is_bot:
+        remember_group_message(context, user_name, text)
 
     if "kul" in text_lower:
         try:
@@ -787,25 +842,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Nima demoqchisiz?")
         return
 
-    # Qo'shiq so'rasa
     if wants_song(text):
         await handle_song(update, context)
         return
 
-    # 1$ yoki BTS tanlash
     if wants_choice(text):
         await handle_choice(update, context)
         return
 
-    if wants_meta(text) or find_selected_weapon(text, context.chat_data.get("last_meta_weapons", [])):
+    saved_meta = context.chat_data.get("last_meta_weapons", [])
+    if only_number_request(text) and saved_meta and not find_selected_weapon(text, saved_meta):
+        await update.message.reply_text("Top-3 ichidan 1, 2 yoki 3 ni tanlang.")
+        return
+
+    if (
+        wants_meta(text)
+        or explicit_game_request(text) is not None
+        or find_selected_weapon(text, context.chat_data.get("last_meta_weapons", []))
+    ):
         await handle_meta(update, context, text)
         return
 
-    user_name = user.first_name or user.full_name or "do'stim"
-    gemini_input = f"Foydalanuvchi ismi: {user_name}\nXabar: {text}"
+    gemini_input = build_gemini_input(context, user_name, text)
 
     try:
-        await update.message.reply_text(await ask_gemini(gemini_input))
+        remember_dialog(context, user_name, text)
+        answer = await ask_gemini(gemini_input)
+        await update.message.reply_text(answer)
+        remember_dialog(context, "Lola", answer)
     except Exception as e:
         print("Gemini javob xatosi:", e)
         error_text = str(e).lower()
