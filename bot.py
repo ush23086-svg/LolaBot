@@ -1,5 +1,6 @@
 import os
 import re
+import random
 import asyncio
 import logging
 import requests
@@ -11,11 +12,13 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 from google import genai
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     ContextTypes,
     filters,
 )
@@ -33,6 +36,7 @@ GEMINI_KEYS = [key for key in GEMINI_KEYS if key]
 
 TZ = ZoneInfo("Asia/Tashkent")
 VIDEO_FILENAME = "SaveVid_Net_AQNKnUIQh4au0ukBFQeeBEE9GNtzkOFvNFXUDTipfHHr9qwI5m8RUCHhFxyUIY.mp4"
+VIDEO_SONG2_FILENAME = "video_2026-05-31_21-36-53.mp4"
 
 CODMUNITY_BASE = "https://codmunity.gg"
 CODMUNITY_URLS = {
@@ -57,8 +61,12 @@ SKIP_META_NAMES = {
     "metasharingcodes", "profavorites", "warzoneabsolutemeta",
     "warzonemeta", "warzonemetacontenders", "mw3absolutemeta",
     "mw3meta", "mw3metacontenders", "easescore", "good",
-    "viable", "other", "loadout", "attachments",
+    "viable", "other", "loadout", "attachments", "pick",
 }
+
+# "Top X ..." kabi satrlarni o'tkazib yuborish
+TOP_N_RE = re.compile(r"^top\s+\d+", re.IGNORECASE)
+
 ATTACHMENT_SLOTS = {
     "muzzle": "Duzgich",
     "barrel": "Stvol",
@@ -71,6 +79,12 @@ ATTACHMENT_SLOTS = {
     "ammunition": "O'q-dori",
     "conversion kit": "Conversion kit",
 }
+
+# Tanlash uchun variantlar (1$ / BTS)
+CHOICE_OPTIONS = [
+    ("1$", "choice_1dollar"),
+    ("BTS", "choice_bts"),
+]
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -253,10 +267,13 @@ def is_numberish(value: str) -> bool:
 
 def valid_weapon_name(value: str) -> bool:
     normalized = normalize_text(value)
-    lowered = value.lower()
+    lowered = value.lower().strip()
     if not normalized or normalized in SKIP_META_NAMES:
         return False
     if lowered in LOADOUT_TYPES or lowered in WEAPON_CLASSES:
+        return False
+    # "Top X ..." kabi satrlarni o'tkazib yuborish
+    if TOP_N_RE.match(lowered):
         return False
     if CODE_RE.match(value) or PICK_RE.search(value) or is_numberish(value):
         return False
@@ -277,7 +294,10 @@ def codmunity_lines(url: str):
 def ranked_name(lines, index):
     match = RANK_WITH_NAME_RE.match(lines[index])
     if match:
-        return match.group(2).replace("###", "").strip()
+        candidate = match.group(2).replace("###", "").strip()
+        if not valid_weapon_name(candidate):
+            return None
+        return candidate
 
     match = RANK_ONLY_RE.match(lines[index])
     if not match or index + 1 >= len(lines):
@@ -287,12 +307,12 @@ def ranked_name(lines, index):
     lowered = name.lower().strip("# ")
     if lowered in {"good", "viable", "other"} or "meta" in lowered:
         return None
-    if index + 1 < len(lines):
-        return name
-    return None
+    if not valid_weapon_name(name):
+        return None
+    return name
 
 
-def parse_meta_page(game: str, limit: int = 10):
+def parse_meta_page(game: str, limit: int = 3):
     lines = codmunity_lines(CODMUNITY_URLS[game])
     title = "Warzone Absolute Meta" if game == "warzone" else "MW3 Absolute Meta"
     fallback_title = "Warzone Meta" if game == "warzone" else "MW3 Meta"
@@ -322,7 +342,7 @@ def parse_meta_page(game: str, limit: int = 10):
             break
 
         name = ranked_name(lines, i)
-        if not name or name.lower() in {"good", "viable", "other"}:
+        if not name:
             i += 1
             continue
 
@@ -351,7 +371,7 @@ def parse_meta_page(game: str, limit: int = 10):
         code = next((x for x in block if CODE_RE.match(x)), "")
 
         key = normalize_text(name)
-        if key not in seen and not PICK_RE.search(name) and not CODE_RE.match(name):
+        if key not in seen:
             seen.add(key)
             weapons.append({
                 "game": game,
@@ -446,7 +466,14 @@ def is_russian_request(text: str) -> bool:
 
 def requested_game(text: str) -> str:
     value = text.lower()
-    if "mw3" in value or "modern warfare 3" in value or "modern warfare3" in value:
+    # MW3 / Modern Warfare 3 / Modern Warfare (raqamsiz ham)
+    if (
+        "mw3" in value
+        or "modern warfare 3" in value
+        or "modern warfare3" in value
+        or "modernwarfare" in value
+        or re.search(r"modern\s*warfare", value)
+    ):
         return "mw3"
     return "warzone"
 
@@ -459,6 +486,16 @@ def wants_meta(text: str) -> bool:
 def wants_only_code(text: str) -> bool:
     value = text.lower()
     return "faqat kod" in value or "kodni tashla" in value or "только код" in value
+
+
+def wants_song(text: str) -> bool:
+    value = text.lower()
+    return any(word in value for word in ["qo'shiq", "qoshiq", "qo'shi", "ashula", "song", "music", "musiqa"])
+
+
+def wants_choice(text: str) -> bool:
+    value = text.lower()
+    return "1$" in value or "1 $" in value or "bts" in value
 
 
 def find_selected_weapon(text: str, weapons):
@@ -494,21 +531,21 @@ def find_selected_weapon(text: str, weapons):
 
 def format_meta_list(weapons, ru: bool = False):
     if ru:
-        text = "Вот актуальные мета-оружия:\n\n"
+        text = "Топ-3 мета-оружия прямо сейчас:\n\n"
         for i, weapon in enumerate(weapons, 1):
             details = " - ".join(x for x in [weapon["type"], weapon["pick"]] if x)
             text += f"{i}. {weapon['name']}"
             if details:
-                text += f" - {details}"
+                text += f" — {details}"
             text += "\n"
         return text + "\nКакое нужно?"
 
-    text = "Yaxshi, mana hozirgi meta qurollar:\n\n"
+    text = "Mana hozirgi Top-3 meta qurollar:\n\n"
     for i, weapon in enumerate(weapons, 1):
         details = " - ".join(x for x in [weapon["type"], weapon["pick"]] if x)
         text += f"{i}. {weapon['name']}"
         if details:
-            text += f" - {details}"
+            text += f" — {details}"
         text += "\n"
     return text + "\nQaysi birining sborkasi yoki kodi kerak?"
 
@@ -660,7 +697,7 @@ async def handle_meta(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
         return
 
     try:
-        weapons = parse_meta_page(game, limit=10)
+        weapons = parse_meta_page(game, limit=3)
     except Exception as e:
         print("CODMunity meta olish xatosi:", e)
         weapons = []
@@ -673,7 +710,49 @@ async def handle_meta(update: Update, context: ContextTypes.DEFAULT_TYPE, text: 
         return
 
     context.chat_data["last_meta_weapons"] = weapons
-    await update.message.reply_text(format_meta_list(weapons[:10], ru))
+    await update.message.reply_text(format_meta_list(weapons, ru))
+
+
+async def handle_song(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Birinchi yoki ikkinchi qo'shiq so'ralsa — inline tugmalar chiqaradi."""
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎵 1-qo'shiq", callback_data="song_1"),
+            InlineKeyboardButton("🎵 2-qo'shiq", callback_data="song_2"),
+        ]
+    ])
+    await update.message.reply_text("Qaysi qo'shiqni yuboray?", reply_markup=keyboard)
+
+
+async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """1$ yoki BTS so'ralganda bot o'zi tasodifiy tanlaydi."""
+    choice = random.choice(["1$", "BTS"])
+    await update.message.reply_text(choice)
+
+
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+
+    if data == "song_1":
+        try:
+            with open(VIDEO_FILENAME, "rb") as video:
+                await query.message.reply_video(video=video)
+        except Exception as e:
+            print("1-qo'shiq yuborishda xato:", e)
+            await query.message.reply_text("Videoni topa olmadim 😅")
+
+    elif data == "song_2":
+        try:
+            with open(VIDEO_SONG2_FILENAME, "rb") as video:
+                await query.message.reply_video(video=video)
+        except Exception as e:
+            print("2-qo'shiq yuborishda xato:", e)
+            await query.message.reply_text("Videoni topa olmadim 😅")
+
+
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -706,6 +785,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not text.strip():
         await update.message.reply_text("Nima demoqchisiz?")
+        return
+
+    # Qo'shiq so'rasa
+    if wants_song(text):
+        await handle_song(update, context)
+        return
+
+    # 1$ yoki BTS tanlash
+    if wants_choice(text):
+        await handle_choice(update, context)
         return
 
     if wants_meta(text) or find_selected_weapon(text, context.chat_data.get("last_meta_weapons", [])):
@@ -794,6 +883,7 @@ def main():
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("week", week_command))
     app.add_handler(CommandHandler("month", month_command))
+    app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
 
     print("Lola bot ishga tushdi...")
