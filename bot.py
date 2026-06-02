@@ -788,7 +788,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif user and not user.is_bot:
         remember_group_message(context, user_name, text)
 
-    if "kul" in text_lower:
+    if text_lower.strip() in ["kul", "kulgin", "kulchi"]:
         try:
             with open(VIDEO_FILENAME, "rb") as video:
                 await update.message.reply_video(video=video)
@@ -817,19 +817,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Top-3 ichidan 1, 2 yoki 3 ni tanlang.")
         return
 
-    if (
-        wants_meta(text)
-        or explicit_game_request(text) is not None
-        or find_selected_weapon(text, context.chat_data.get("last_meta_weapons", []))
-    ):
-        await handle_meta(update, context, text)
-        return
+   def wants_meta(text: str) -> bool:
+    value = text.lower().strip()
+
+    trigger_words = [
+        "meta qurol",
+        "meta weapon",
+        "warzone meta",
+        "mw3 meta",
+        "meta sborka",
+        "meta loadout",
+        "meta kod",
+        "top meta",
+    ]
+
+    return any(word in value for word in trigger_words)
 
     gemini_input = build_gemini_input(context, user_name, text)
 
     try:
-        remember_dialog(context, user_name, text)
-        answer = await ask_gemini(gemini_input)
+       remember_dialog(context, user_name, text)
+
+gemini_input = build_gemini_input(context, user_name, text)
+
+answer = await ask_gemini(gemini_input)
         await update.message.reply_text(answer)
         remember_dialog(context, "Lola", answer)
     except Exception as e:
