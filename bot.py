@@ -76,7 +76,7 @@ async def ask_gemini(text: str):
         client = genai.Client(api_key=GEMINI_KEY)
 
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-1.5-pro",
             contents=[
                 {
                     "role": "user",
