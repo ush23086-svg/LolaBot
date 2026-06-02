@@ -823,8 +823,9 @@ if chat.type != "private":
         return
 
     if wants_choice(text):
-        await handle_choice(update, context)
-        return
+       if len(text.split()) > 6:
+    pass
+else:
 
     saved_meta = context.chat_data.get("last_meta_weapons", [])
     if only_number_request(text) and saved_meta and not find_selected_weapon(text, saved_meta):
