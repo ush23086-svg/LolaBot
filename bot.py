@@ -795,6 +795,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("😄")
         return
 
+if chat.type != "private":
+    if not update.message.reply_to_message:
+        return
+
+    if update.message.reply_to_message.from_user.id != context.bot.id:
+        return
+        
     if not should_bot_reply(update, context):
         return
 
