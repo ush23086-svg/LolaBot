@@ -822,7 +822,11 @@ if chat.type != "private":
         await handle_song(update, context)
         return
 
-    if wants_choice(text):
+    if text_lower.strip() in [
+    "qo'shiq ayt",
+    "qoshiq ayt",
+    "ashula ayt",
+]:
        if len(text.split()) > 6:
     pass
 else:
