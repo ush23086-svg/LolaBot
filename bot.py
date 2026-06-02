@@ -606,7 +606,16 @@ async def ask_gemini(user_text: str) -> str:
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
-                contents=f"{SYSTEM_PROMPT}\n\nFoydalanuvchi xabari:\n{user_text}",
+                contents=[
+    {
+        "role": "user",
+        "parts": [SYSTEM_PROMPT]
+    },
+    {
+        "role": "user",
+        "parts": [user_text]
+    }
+]
             )
             if response.text:
                 return response.text.strip()
