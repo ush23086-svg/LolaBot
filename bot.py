@@ -93,7 +93,7 @@ async def ask_gemini(text: str):
 
     except Exception as e:
         print(e)
-        return "Keyinroq yoz 😊"
+        return "Keyinroq yozing 😊"
 
 # =========================
 # STATS
