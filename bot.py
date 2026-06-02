@@ -785,8 +785,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             add_message_stat(chat.id, user.id, full_name)
         except Exception as db_err:
             print("DB xatosi:", db_err)
-    elif user and not user.is_bot:
-        remember_group_message(context, user_name, text)
 
     if text_lower.strip() in ["kul", "kulgin", "kulchi"]:
         try:
