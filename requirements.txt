@@ -1,6 +1,6 @@
-python-telegram-bot==21.0.1
-google-genai
-python-dotenv
-psycopg2-binary
-beautifulsoup4
-requests
+aiogram==3.13.1
+aiohttp==3.10.11
+beautifulsoup4==4.12.3
+python-dotenv==1.0.1
+pydantic-settings==2.7.0
+requests==2.32.3

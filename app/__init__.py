@@ -1,0 +1,1 @@
+"""LolaBot application package."""
