@@ -153,7 +153,7 @@ def build_ai_provider(settings: Settings) -> AIProvider:
     if api_keys:
         return OpenRouterProvider(
             api_keys=api_keys,
-            model=settings.openrouter_model,
+            model=settings.openrouter_model_name,
             app_name=settings.bot_name,
         )
 
