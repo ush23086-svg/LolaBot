@@ -52,29 +52,20 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# ==================== QATTIQ SYSTEM PROMPT (TO'QIMAYDI) ====================
+# ==================== SYSTEM PROMPT (SODDALASHTRILGAN) ====================
 SYSTEM_PROMPT = """
-Sen Lola. QATTIQ QOIDALAR:
+Sen Lola. Qisqa va aniq javob ber. 1-2 jumla yetarli.
 
-1. Agar bilmasang, "Buni bilmayman" deb javob ber. HECH QACHON O'ZINDAN TO'QIMA.
-2. 1-2 jumla bilan javob ber. Uzoq gapirma.
-3. Savolga faqat aniq javob ber. Keraksiz tushuntirish qo'shma.
-4. Emoji faqat bitta ishlat.
+Agar bilmasang: "Buni bilmayman 🤷‍♀️" de.
 
-TIL:
-- O'zbekcha so'ralsa — o'zbekcha
-- Ruscha so'ralsa — ruscha
-
-TAQIQLAR:
-- "Odatda", "ehtimol", "taxminan" kabi so'zlarni ishlatma
-- Bilmasang, "Bilmayman" de
+Tilni qat'iy: O'zbekcha so'ralsa - o'zbekcha, ruscha so'ralsa - ruscha.
 
 Endi ishla.
 """
 
-# ==================== GEMINI (3 TA KEY, QISQA, TO'QIMAYDI) ====================
+# ==================== GEMINI (3 TA KEY, OPTIMALLASHTIRILGAN) ====================
 async def ask_gemini(user_text: str) -> str:
-    """3 ta key bilan ishlaydi, bilmasa bilmayman deydi"""
+    """3 ta key bilan ishlaydi, javoblarni qaytaradi"""
     if not GEMINI_KEYS:
         return "Gemini kaliti topilmadi."
 
@@ -85,20 +76,31 @@ async def ask_gemini(user_text: str) -> str:
                 model="gemini-2.5-flash",
                 contents=f"{SYSTEM_PROMPT}\n\nFoydalanuvchi: {user_text}",
                 config={
-                    "max_output_tokens": 100,
-                    "temperature": 0.3,
+                    "max_output_tokens": 150,  # TUZATILDI: 100 dan 150 ga (o'zbek tilidagi normal javob uchun)
+                    "temperature": 0.7,  # TUZATILDI: 0.3 dan 0.7 ga (model more creative)
                 }
             )
             
             if response and response.text:
                 answer = response.text.strip()
-                # Agar javob ma'nosiz yoki uzun bo'lsa
-                if len(answer) < 2 or len(answer) > 300:
+                
+                # TUZATILDI: Chegaralarni ozimlashtirildi
+                if len(answer) < 5:  # Juda qisqa bo'lsa
                     continue
-                # To'qima so'zlar bo'lsa rad et
-                bad_words = ["odatda", "ehtimol", "taxminan", "maybe", "probably"]
-                if any(word in answer.lower() for word in bad_words):
+                if len(answer) > 500:  # Juda uzun bo'lsa
                     continue
+                
+                # TUZATILDI: bad_words ro'yxati ozimlashtirildi
+                # Faqat haqiqatan keraksiz so'zlarni tekshir
+                bad_patterns = [
+                    r"i\'m not sure",  # Inglizcha
+                    r"i don\'t know",  # Inglizcha
+                ]
+                
+                is_bad = any(re.search(pattern, answer.lower()) for pattern in bad_patterns)
+                if is_bad:
+                    continue
+                
                 return answer
                 
         except Exception as e:
@@ -110,7 +112,7 @@ async def ask_gemini(user_text: str) -> str:
                 continue
             continue
     
-    return "Buni bilmayman. 🤷‍♀️"
+    return "Buni bilmayman 🤷‍♀️"
 
 # ==================== DATABASE ====================
 def db_connect():
@@ -306,7 +308,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(weapons[idx]["code"])
             return
     
-    # Gemini ga yubor (to'qimaydi, bilmasa bilmayman deydi)
+    # Gemini ga yubor
     answer = await ask_gemini(text)
     await update.message.reply_text(answer)
 
