@@ -25,7 +25,14 @@ load_dotenv()
 # ==================== KONFIGURATSIYA ====================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY_1")
+
+# 3 ta Gemini key
+GEMINI_KEYS = [
+    os.getenv("GEMINI_API_KEY_1"),
+    os.getenv("GEMINI_API_KEY_2"),
+    os.getenv("GEMINI_API_KEY_3"),
+]
+GEMINI_KEYS = [key for key in GEMINI_KEYS if key]  # Bo'sh bo'lganlarni olib tashla
 
 TZ = ZoneInfo("Asia/Tashkent")
 VIDEO_FILENAME = "SaveVid_Net_AQNKnUIQh4au0ukBFQeeBEE9GNtzkOFvNFXUDTipfHHr9qwI5m8RUCHhFxyUIY.mp4"
@@ -207,33 +214,39 @@ def parse_meta_weapons(game: str, limit: int = 3):
 
     return weapons
 
-# ==================== GEMINI (QISQA JAVOB) ====================
+# ==================== GEMINI (3 TA KEY BILAN, QISQA JAVOB) ====================
 async def ask_gemini(user_text: str) -> str:
-    if not GEMINI_API_KEY:
+    if not GEMINI_KEYS:
         return "Bugun charchadim, ertaga 😊"
 
-    try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=f"{SYSTEM_PROMPT}\n\nFoydalanuvchi: {user_text}",
-            config={
-                "max_output_tokens": 150,
-                "temperature": 0.5,
-            }
-        )
-        if response.text:
-            answer = response.text.strip()
-            if len(answer) > 500:
-                answer = answer[:500] + "..."
-            return answer
-    except Exception as e:
-        logging.error(f"Gemini xatosi: {e}")
-        if "429" in str(e) or "quota" in str(e):
-            return "Bugun charchadim, ertaga 😊"
-        return "Xatolik yuz berdi. Keyinroq yozing 😊"
+    last_error = None
     
-    return "Javob topa olmadim 😅"
+    for api_key in GEMINI_KEYS:
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=f"{SYSTEM_PROMPT}\n\nFoydalanuvchi: {user_text}",
+                config={
+                    "max_output_tokens": 150,
+                    "temperature": 0.5,
+                }
+            )
+            if response.text:
+                answer = response.text.strip()
+                if len(answer) > 500:
+                    answer = answer[:500] + "..."
+                return answer
+        except Exception as e:
+            last_error = e
+            logging.warning(f"Gemini key {api_key[:10]}... xatosi: {e}")
+            continue  # Keyingi keyni sinab ko'r
+    
+    # Hammasi fail bo'lsa
+    if last_error and ("429" in str(last_error) or "quota" in str(last_error) or "resource_exhausted" in str(last_error)):
+        return "Bugun charchadim, ertaga 😊"
+    
+    return "Xatolik yuz berdi. Keyinroq yozing 😊"
 
 # ==================== YORDAMCHI FUNKSIYALAR ====================
 def wants_meta(text: str) -> bool:
@@ -379,14 +392,67 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     answer = await ask_gemini(text)
     await update.message.reply_text(answer)
 
+# ==================== KUNLIK HISOBOT ====================
+async def send_daily_report(app):
+    while True:
+        now = datetime.now(TZ)
+        target = datetime.combine(now.date(), time(8, 0), tzinfo=TZ)
+        if now >= target:
+            target += timedelta(days=1)
+        await asyncio.sleep((target - now).total_seconds())
+
+        report_day = datetime.now(TZ).date()
+        stat_day = (datetime.now(TZ) - timedelta(days=1)).date()
+
+        try:
+            chat_ids = get_all_chat_ids()
+        except Exception as e:
+            logging.error(f"Chat ID olishda xato: {e}")
+            continue
+
+        for chat_id in chat_ids:
+            try:
+                if was_report_sent(chat_id, report_day):
+                    continue
+                rows = get_stats(chat_id, stat_day)
+                if not rows:
+                    continue
+
+                total = sum(row["count"] for row in rows)
+                try:
+                    chat_info = await app.bot.get_chat(int(chat_id))
+                    group_name = chat_info.title or "guruh"
+                except Exception:
+                    group_name = "guruh"
+
+                text = f"⏰ Hayrli tong, {group_name}!\n\n"
+                text += f"Kecha chatga jami {total} ta xabar yuborildi.\n\n"
+                text += "Eng faol ishtirokchilar:\n"
+                medals = ["🥇", "🥈", "🥉"]
+                for i, row in enumerate(rows[:3]):
+                    text += f"{medals[i]} {row['user_name']} ({row['count']} ta)\n"
+                text += "\n💬 Men bilan suhbatlashish uchun mening xabarimga reply qiling."
+
+                await app.bot.send_message(chat_id=int(chat_id), text=text)
+                mark_report_sent(chat_id, report_day)
+            except Exception as e:
+                logging.error(f"Hisobot yuborishda xato: {e}")
+
 # ==================== ASOSIY ====================
 async def post_init(app):
     init_db()
+    asyncio.create_task(send_daily_report(app))
     logging.info("Lola bot ishga tushdi!")
 
 def main():
-    if not TELEGRAM_TOKEN or not DATABASE_URL or not GEMINI_API_KEY:
-        print("Xato: .env faylida TOKEN, DATABASE_URL yoki GEMINI_API_KEY yo'q")
+    if not TELEGRAM_TOKEN:
+        print("Xato: TELEGRAM_BOT_TOKEN topilmadi")
+        return
+    if not GEMINI_KEYS:
+        print("Xato: GEMINI_API_KEY_1, _2 yoki _3 topilmadi")
+        return
+    if not DATABASE_URL:
+        print("Xato: DATABASE_URL topilmadi")
         return
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
@@ -395,7 +461,7 @@ def main():
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("✅ Lola bot ishga tushdi...")
+    print("✅ Lola bot ishga tushdi (3 ta Gemini key bilan)...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
