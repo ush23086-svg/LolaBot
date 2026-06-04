@@ -212,7 +212,7 @@ def parse_meta_weapons(game: str, limit: int = 3):
 
 # ==================== HANDLERLAR ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salom, men Lola! 😊")
+    await update.message.reply_text("Salom 🙂 Bemalol yozing.")
 
 async def lola_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
