@@ -11,6 +11,7 @@ from app.config import Settings
 logger = logging.getLogger(__name__)
 
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+AI_ERROR_MESSAGE = "Hozir javob berishda muammo bo'ldi. Keyinroq urinib ko'ring."
 
 SYSTEM_PROMPT = """
 Sen Lola ismli Telegram botisan.
@@ -43,10 +44,10 @@ class AIProvider(ABC):
 
 class NullAIProvider(AIProvider):
     async def ask_ai(self, text: str, user_name: str) -> str:
-        return "Hozir biroz jimman. Keyinroq yozing 🙂"
+        return AI_ERROR_MESSAGE
 
     async def analyze_image(self, image_base64: str, user_name: str, caption: str = "") -> str:
-        return "Rasmni hozir aniq o'qiy olmadim. Keyinroq qayta yuboring."
+        return AI_ERROR_MESSAGE
 
 
 class OpenRouterProvider(AIProvider):
@@ -114,7 +115,7 @@ class OpenRouterProvider(AIProvider):
                 timeout = aiohttp.ClientTimeout(total=60)
                 async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
                     async with session.post(OPENROUTER_CHAT_URL, json=payload) as response:
-                        data = await response.json(content_type=None)
+                        data = await _response_data(response)
                         if response.status >= 400:
                             logger.warning(
                                 "OpenRouter key %s error %s: %s",
@@ -124,7 +125,7 @@ class OpenRouterProvider(AIProvider):
                             )
                             if _should_try_next_key(response.status, data):
                                 continue
-                            return "Hozir javob berishda biroz muammo bo'ldi. Keyinroq urinib ko'ring."
+                            return AI_ERROR_MESSAGE
             except aiohttp.ClientError as exc:
                 logger.exception("OpenRouter key %s request failed: %s", key_index, exc)
                 continue
@@ -136,14 +137,14 @@ class OpenRouterProvider(AIProvider):
                 content = data["choices"][0]["message"]["content"]
             except (KeyError, IndexError, TypeError):
                 logger.warning("Unexpected OpenRouter response: %s", data)
-                return "Hozir aniq javob topa olmadim. Yana bir marta urinib ko'ring."
+                return AI_ERROR_MESSAGE
 
             if not content:
-                return "Hozir aniq javob topa olmadim. Yana bir marta urinib ko'ring."
+                return AI_ERROR_MESSAGE
 
             return content.strip()
 
-        return "Hozir javob berishda biroz muammo bo'ldi. Keyinroq urinib ko'ring."
+        return AI_ERROR_MESSAGE
 
 
 def build_ai_provider(settings: Settings) -> AIProvider:
@@ -161,6 +162,25 @@ def build_ai_provider(settings: Settings) -> AIProvider:
 
 def _should_try_next_key(status: int, data: Any) -> bool:
     text = str(data).lower()
-    if status in {401, 403, 429}:
+    if status in {401, 402, 403, 429}:
         return True
-    return any(word in text for word in ("429", "quota", "rate limit", "ratelimit"))
+    return any(
+        phrase in text
+        for phrase in (
+            "429",
+            "quota",
+            "rate limit",
+            "ratelimit",
+            "insufficient credits",
+            "insufficient credit",
+            "no credits",
+            "credit balance",
+        )
+    )
+
+
+async def _response_data(response: aiohttp.ClientResponse) -> Any:
+    try:
+        return await response.json(content_type=None)
+    except Exception:
+        return await response.text()
