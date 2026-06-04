@@ -1,5 +1,7 @@
 import base64
 import logging
+import random
+import re
 
 from aiogram import Bot, F, Router
 from aiogram.filters import CommandStart
@@ -21,6 +23,13 @@ router = Router()
 logger = logging.getLogger(__name__)
 TELEGRAM_TEXT_LIMIT = 4096
 CHAT_DATA: dict[int, dict] = {}
+GREETING_RE = re.compile(r"^\s*(salom|assalomu alaykum|assalom|hello|hi|privet|привет)\s*[!.?]*\s*$", re.IGNORECASE)
+GREETINGS = [
+    "Salom 😊",
+    "Xa, shu yerdaman 🙂",
+    "Keldingizmi 😄",
+    "Eshitaman.",
+]
 
 
 def _user_label(message: Message) -> str:
@@ -65,9 +74,7 @@ async def _send_answer(message: Message, text: str, status: Message | None = Non
 
 @router.message(CommandStart())
 async def start_handler(message: Message) -> None:
-    await message.answer(
-        "Salom, men Lolaman. Warzone yoki MW3 meta kerak bo'lsa yozing. AI keyin ulansa, skrinlarni ham tahlil qilaman."
-    )
+    await message.answer("Salom 😊 Bemalol yozing.")
 
 
 @router.message(F.photo)
@@ -112,6 +119,10 @@ async def text_handler(
     text = message.text or ""
     if not text.strip():
         await message.answer("Aniqroq yozing.")
+        return
+
+    if GREETING_RE.match(text):
+        await message.answer(random.choice(GREETINGS))
         return
 
     chat_data = _chat_data(message)
