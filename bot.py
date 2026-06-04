@@ -110,7 +110,7 @@ async def ask_gemini(user_text: str) -> str:
                 continue
             continue
     
-    return "Buni bilmayman. 😊"
+    return "Buni bilmayman. 🤷‍♀️"
 
 # ==================== DATABASE ====================
 def db_connect():
