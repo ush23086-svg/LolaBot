@@ -1,10 +1,12 @@
 import base64
+import asyncio
 import logging
 import random
 import re
+from datetime import timedelta
 
 from aiogram import Bot, F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
 from app.services.ai_provider import AIProvider
@@ -17,6 +19,11 @@ from app.services.meta_engine import (
     format_weapon_loadout,
     is_meta_request,
     requested_game,
+)
+from app.services.stats_service import (
+    StatsService,
+    format_stats,
+    today_key,
 )
 
 router = Router()
@@ -75,6 +82,65 @@ async def _send_answer(message: Message, text: str, status: Message | None = Non
 @router.message(CommandStart())
 async def start_handler(message: Message) -> None:
     await message.answer("Salom 😊 Bemalol yozing.")
+
+
+@router.message(Command("stats"))
+async def stats_handler(message: Message, stats_service: StatsService) -> None:
+    if message.chat.type == "private":
+        await message.answer("Statistika faqat guruhlar uchun ishlaydi.")
+        return
+
+    rows = await asyncio.to_thread(stats_service.get_stats, message.chat.id, today_key())
+    if not rows:
+        await message.answer("Bugun hali statistika yo'q.")
+        return
+
+    total = sum(int(row["count"]) for row in rows)
+    await message.answer(format_stats("Bugungi statistika", total, rows))
+
+
+@router.message(Command("week"))
+async def week_handler(message: Message, stats_service: StatsService) -> None:
+    if message.chat.type == "private":
+        await message.answer("Haftalik statistika faqat guruhlar uchun ishlaydi.")
+        return
+
+    today = today_key()
+    start_day = today - timedelta(days=today.weekday())
+    rows = await asyncio.to_thread(
+        stats_service.get_stats_range,
+        message.chat.id,
+        start_day,
+        today,
+    )
+    if not rows:
+        await message.answer("Bu hafta hali statistika yo'q.")
+        return
+
+    total = sum(int(row["count"]) for row in rows)
+    await message.answer(format_stats("Haftalik statistika", total, rows))
+
+
+@router.message(Command("month"))
+async def month_handler(message: Message, stats_service: StatsService) -> None:
+    if message.chat.type == "private":
+        await message.answer("Oylik statistika faqat guruhlar uchun ishlaydi.")
+        return
+
+    today = today_key()
+    start_day = today.replace(day=1)
+    rows = await asyncio.to_thread(
+        stats_service.get_stats_range,
+        message.chat.id,
+        start_day,
+        today,
+    )
+    if not rows:
+        await message.answer("Bu oy hali statistika yo'q.")
+        return
+
+    total = sum(int(row["count"]) for row in rows)
+    await message.answer(format_stats("Oylik statistika", total, rows))
 
 
 @router.message(F.photo)

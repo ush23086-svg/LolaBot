@@ -3,9 +3,10 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-OPENROUTER_DEFAULT_MODEL = "google/gemma-3n-e4b-it:free"
+OPENROUTER_DEFAULT_MODEL = "meta-llama/llama-3.2-3b-instruct:free"
 OPENROUTER_LEGACY_MODEL_ALIASES = {
     "google/gemma-3-27b-it:free": OPENROUTER_DEFAULT_MODEL,
+    "google/gemma-3n-e4b-it:free": OPENROUTER_DEFAULT_MODEL,
 }
 
 

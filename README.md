@@ -7,8 +7,10 @@ LolaBot - Telegram uchun o'zbekcha yordamchi bot. Bot `aiogram` bilan ishlaydi, 
 - Telegram bot `aiogram` 3 asosida ishlaydi.
 - OpenRouter API orqali Gemma free modeliga ulanadi.
 - `OPENROUTER_API_KEY_1/2/3` bo'yicha key rotation ishlaydi.
-- Default model: `google/gemma-3n-e4b-it:free`.
+- Default model: `meta-llama/llama-3.2-3b-instruct:free`.
 - Warzone/MW3 meta javoblari CODMunity parser + chat state orqali beriladi.
+- Guruhlarda xabar statistikasi: `/stats`, `/week`, `/month`.
+- Har kuni 08:00 da guruhlarga kechagi daily report yuboradi.
 - CODMunity'dan weapon name, type, pick rate, code va attachmentlar olinadi.
 - Parser data topolmasa bot taxmin qilmaydi.
 - Railway deploy uchun `Procfile` va `railway.toml` tayyor.
@@ -49,6 +51,18 @@ CODMunity'dan ma'lumot olishda muammo bo'ldi
 
 deb javob beradi.
 
+## Statistika
+
+Bot guruhlarda barcha xabarlarni sanaydi. Oddiy xabarlarga javob bermaydi; Lola bilan gaplashish uchun guruhda uning xabariga reply qilish kerak. Statistika uchun PostgreSQL `DATABASE_URL` kerak.
+
+Buyruqlar:
+
+```text
+/stats
+/week
+/month
+```
+
 ## Local ishga tushirish
 
 ```bash
@@ -75,7 +89,7 @@ DATABASE_URL=
 OPENROUTER_API_KEY_1=
 OPENROUTER_API_KEY_2=
 OPENROUTER_API_KEY_3=
-OPENROUTER_MODEL=google/gemma-3n-e4b-it:free
+OPENROUTER_MODEL=meta-llama/llama-3.2-3b-instruct:free
 ```
 
 Botni ishga tushirish:
@@ -94,7 +108,7 @@ DATABASE_URL=
 OPENROUTER_API_KEY_1=
 OPENROUTER_API_KEY_2=
 OPENROUTER_API_KEY_3=
-OPENROUTER_MODEL=google/gemma-3n-e4b-it:free
+OPENROUTER_MODEL=meta-llama/llama-3.2-3b-instruct:free
 ```
 
 Railway `python bot.py` komandasi bilan botni worker sifatida ishga tushiradi.
