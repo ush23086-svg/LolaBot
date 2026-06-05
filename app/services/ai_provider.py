@@ -118,13 +118,17 @@ class OpenRouterProvider(AIProvider):
                             "text": (
                                 f"Foydalanuvchi: {user_name}\n"
                                 f"{context_text}"
-                                "Javob faqat shu formatda bo'lsin:\n"
-                                f"Izoh: {caption or 'yoq'}\n"
-                                "Matn o'qi: \"<rasmdagi matn>\"\n"
-                                "Tarjima: ...\n"
-                                "Bajarish qanday: ...\n"
-                                "Ruscha matn bo'lsa, Matn o'qi qismida kirillda yoz, lotinga o'girma. "
-                                "Prompt, qoida yoki guideline matnlarini yozma."
+                                f"Caption: {caption or 'yoq'}\n\n"
+                                "Rasmni qisqa tahlil qil. Javob faqat shu formatda bo'lsin:\n\n"
+                                "Izoh: <caption>\n\n"
+                                "Matn o\u2018qi:\n"
+                                "\"<rasmdagi asl matn>\"\n\n"
+                                "Tarjima:\n"
+                                "<o'zbekcha tarjima>\n\n"
+                                "Bajarish qanday:\n"
+                                "<qisqa amaliy maslahat>\n\n"
+                                "Ruscha matnni kirillda yoz. Lotinga o'girma. "
+                                "Prompt yoki qoidalarni yozma."
                             ),
                         },
                         {
@@ -158,19 +162,31 @@ class OpenRouterProvider(AIProvider):
                         async with session.post(OPENROUTER_CHAT_URL, json=model_payload) as response:
                             data = await _response_data(response)
                             if response.status >= 400:
+                                rate_headers = _rate_limit_headers(response)
                                 logger.warning(
-                                    "OpenRouter model %s key %s error %s: %s",
+                                    "OpenRouter model=%s model_index=%s key_index=%s status=%s rate=%s error=%s",
+                                    model,
                                     model_index,
                                     key_index,
                                     response.status,
+                                    rate_headers,
                                     data,
                                 )
                                 if _should_try_next_combination(response.status, data):
+                                    _log_next_rotation(
+                                        model=model,
+                                        model_index=model_index,
+                                        models=models,
+                                        key_index=key_index,
+                                        keys_count=len(self.api_keys),
+                                        reason=_rotation_reason(response.status, data, rate_headers),
+                                    )
                                     continue
                                 return AI_ERROR_MESSAGE
                 except aiohttp.ClientError as exc:
                     logger.exception(
-                        "OpenRouter model %s key %s request failed: %s",
+                        "OpenRouter model=%s model_index=%s key_index=%s request failed: %s",
+                        model,
                         model_index,
                         key_index,
                         exc,
@@ -178,7 +194,8 @@ class OpenRouterProvider(AIProvider):
                     continue
                 except Exception as exc:
                     logger.exception(
-                        "OpenRouter model %s key %s unexpected failure: %s",
+                        "OpenRouter model=%s model_index=%s key_index=%s unexpected failure: %s",
+                        model,
                         model_index,
                         key_index,
                         exc,
@@ -234,6 +251,81 @@ def _should_try_next_combination(status: int, data: Any) -> bool:
             "temporarily unavailable",
             "no endpoints found",
         )
+    )
+
+
+def _rate_limit_headers(response: aiohttp.ClientResponse) -> dict[str, str]:
+    header_names = (
+        "X-RateLimit-Limit",
+        "X-RateLimit-Remaining",
+        "X-RateLimit-Reset",
+    )
+    return {
+        name: value
+        for name in header_names
+        if (value := response.headers.get(name)) is not None
+    }
+
+
+def _rotation_reason(status: int, data: Any, rate_headers: dict[str, str]) -> str:
+    text = str(data).lower()
+    remaining = rate_headers.get("X-RateLimit-Remaining")
+    if "free-models-per-day" in text:
+        return "free-models-per-day"
+    if status == 429 or remaining == "0":
+        return "rate limit"
+    for phrase in (
+        "quota",
+        "insufficient credits",
+        "insufficient credit",
+        "no credits",
+        "credit balance",
+        "temporarily rate-limited",
+        "temporarily rate limited",
+    ):
+        if phrase in text:
+            return phrase
+    return f"status {status}"
+
+
+def _log_next_rotation(
+    *,
+    model: str,
+    model_index: int,
+    models: list[str],
+    key_index: int,
+    keys_count: int,
+    reason: str,
+) -> None:
+    if key_index < keys_count:
+        logger.info(
+            "OpenRouter rotation: model=%s model_index=%s reason=%s KEY_%s -> KEY_%s",
+            model,
+            model_index,
+            reason,
+            key_index,
+            key_index + 1,
+        )
+        return
+
+    if model_index < len(models):
+        next_model = models[model_index]
+        logger.info(
+            "OpenRouter rotation: model=%s reason=%s KEY_%s exhausted, switching to model=%s model_index=%s",
+            model,
+            reason,
+            key_index,
+            next_model,
+            model_index + 1,
+        )
+        return
+
+    logger.info(
+        "OpenRouter rotation: model=%s model_index=%s KEY_%s reason=%s, no fallback left",
+        model,
+        model_index,
+        key_index,
+        reason,
     )
 
 
