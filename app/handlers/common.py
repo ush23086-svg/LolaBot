@@ -33,10 +33,9 @@ GREETING_RE = re.compile(
     re.IGNORECASE,
 )
 LOLA_PRESENCE_RE = re.compile(
-    r"^\s*lola\s*(?:\?|bormisan\??|shu yerdamisan\??|qayerdasan\??|eshityapsanmi\??)?\s*$",
+    r"^\s*lola\s*(?:\?|bormisan\??|shu yerdamisan\??|qayerdasan\??|eshityapsanmi\??)\s*$",
     re.IGNORECASE,
 )
-GREETINGS = ["Salom 😊", "Salom 🙂", "Salom."]
 PRESENCE_REPLIES = ["Xa, shu yerdaman 🙂", "Eshitaman.", "Shu yerdaman."]
 
 
@@ -45,6 +44,23 @@ def _user_label(message: Message) -> str:
     if not user:
         return "foydalanuvchi"
     return user.full_name or user.username or "foydalanuvchi"
+
+
+def _user_display_name(message: Message) -> str:
+    user = message.from_user
+    if not user:
+        return ""
+
+    name = user.full_name or user.username or ""
+    name = name.strip().lstrip("@")
+    return name
+
+
+def _greeting_for(message: Message) -> str:
+    name = _user_display_name(message)
+    if not name:
+        return "Salom 😊"
+    return f"Salom, {name} 😊"
 
 
 async def _should_answer(message: Message, bot: Bot) -> bool:
@@ -207,7 +223,7 @@ async def text_handler(
         return
 
     if GREETING_RE.match(text):
-        await message.answer(random.choice(GREETINGS))
+        await message.answer(_greeting_for(message))
         return
 
     if LOLA_PRESENCE_RE.match(text):

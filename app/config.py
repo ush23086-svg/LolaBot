@@ -3,11 +3,11 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-OPENROUTER_DEFAULT_MODEL = "meta-llama/llama-3.2-3b-instruct:free"
-OPENROUTER_DEFAULT_VISION_MODEL = "meta-llama/llama-3.2-11b-vision-instruct"
+OPENROUTER_DEFAULT_MODEL = "google/gemma-4-31b-it:free"
 OPENROUTER_LEGACY_MODEL_ALIASES = {
     "google/gemma-3-27b-it:free": OPENROUTER_DEFAULT_MODEL,
     "google/gemma-3n-e4b-it:free": OPENROUTER_DEFAULT_MODEL,
+    "meta-llama/llama-3.2-3b-instruct:free": OPENROUTER_DEFAULT_MODEL,
 }
 
 
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     openrouter_model_2: str | None = Field(default=None, alias="OPENROUTER_MODEL_2")
     openrouter_model_3: str | None = Field(default=None, alias="OPENROUTER_MODEL_3")
     openrouter_vision_model_1: str | None = Field(
-        default=OPENROUTER_DEFAULT_VISION_MODEL,
+        default=None,
         alias="OPENROUTER_VISION_MODEL_1",
     )
     openrouter_vision_model_2: str | None = Field(
