@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 AI_ERROR_MESSAGE = "Hozir javob berishda muammo bo'ldi. Keyinroq urinib ko'ring."
-IMAGE_ERROR_MESSAGE = "Rasmni hozir o'qiy olmadim. Matnini yozib yuboring."
+IMAGE_ERROR_MESSAGE = "Rasmni ko'rish modeli ulanmagan. OPENROUTER_VISION_MODEL_1 qo'shing."
 
 SYSTEM_PROMPT = """
 Sen Lola ismli Telegram botisan.
