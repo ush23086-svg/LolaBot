@@ -12,9 +12,11 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://codmunity.gg"
 WARZONE_META_URL = f"{BASE_URL}/warzone"
 MW3_META_URL = f"{BASE_URL}/mw3"
+RANKED_META_URL = f"{BASE_URL}/warzoneranked"
 
 CODE_RE = re.compile(r"^[A-Z]\d{2}-[A-Z0-9]+(?:-[A-Z0-9]+){1,3}$")
 PICK_RE = re.compile(r"^\d+(?:\.\d+)?%\s*Pick$", re.IGNORECASE)
+PICK_VALUE_RE = re.compile(r"^\d+(?:\.\d+)?%$", re.IGNORECASE)
 NUMBER_RE = re.compile(r"(\d{1,2})")
 
 ORDINALS = {
@@ -150,6 +152,9 @@ class CodmunityClient:
     def get_mw3_meta(self, limit: int = 6) -> list[MetaWeapon]:
         return self._get_meta(MW3_META_URL, game="mw3", limit=limit)
 
+    def get_ranked_meta(self, limit: int = 6) -> list[MetaWeapon]:
+        return self._get_meta(RANKED_META_URL, game="ranked", limit=limit)
+
     def get_weapon_loadout(self, weapon: MetaWeapon) -> MetaWeapon:
         if not weapon.url:
             raise MetaEngineError("CODMunity'dan ma'lumot olishda muammo bo'ldi")
@@ -170,6 +175,25 @@ class CodmunityClient:
         links = _weapon_links(soup)
         lines = _visible_lines(soup)
         weapons = _parse_meta_lines(lines, links=links, game=game, limit=limit)
+        heading_found = _has_absolute_meta_heading(lines, game)
+
+        logger.info(
+            "CODMunity %s meta parse: visible_lines=%s weapon_links=%s parsed_weapons=%s heading_found=%s",
+            game,
+            len(lines),
+            len(links),
+            len(weapons),
+            heading_found,
+        )
+
+        if not weapons:
+            weapons = _weapons_from_soup_links(soup, game=game, limit=limit)
+            logger.info(
+                "CODMunity %s fallback from weapon links: parsed_weapons=%s heading_found=%s",
+                game,
+                len(weapons),
+                heading_found,
+            )
 
         if not weapons:
             raise MetaEngineError("CODMunity'dan ma'lumot olishda muammo bo'ldi")
@@ -200,6 +224,10 @@ def get_warzone_meta(limit: int = 6, timeout: int = 15) -> list[dict]:
 
 def get_mw3_meta(limit: int = 6, timeout: int = 15) -> list[dict]:
     return [weapon.to_dict() for weapon in CodmunityClient(timeout).get_mw3_meta(limit)]
+
+
+def get_ranked_meta(limit: int = 6, timeout: int = 15) -> list[dict]:
+    return [weapon.to_dict() for weapon in CodmunityClient(timeout).get_ranked_meta(limit)]
 
 
 def find_selected_weapon(text: str, weapons: Iterable[dict | MetaWeapon]) -> MetaWeapon | None:
@@ -266,14 +294,18 @@ def format_weapon_loadout(weapon: MetaWeapon) -> str:
 
 def is_meta_request(text: str) -> bool:
     query = normalize_text(text)
-    return "meta" in query or any(key in query for key in ("warzoneloadout", "mw3loadout"))
+    return "meta" in query or any(key in query for key in ("warzoneloadout", "mw3loadout", "rankedloadout"))
 
 
-def requested_game(text: str) -> str:
+def requested_game(text: str) -> str | None:
     query = normalize_text(text)
     if "mw3" in query:
         return "mw3"
-    return "warzone"
+    if "ranked" in query or "rank" in query:
+        return "ranked"
+    if "warzone" in query or "warzoneloadout" in query:
+        return "warzone"
+    return None
 
 
 def _visible_lines(soup: Any) -> list[str]:
@@ -293,11 +325,42 @@ def _weapon_links(soup: Any) -> dict[str, str]:
         href = anchor["href"]
         if "/weapon/" not in href:
             continue
-        name = anchor.get_text(" ", strip=True)
+        name = anchor.get_text(" ", strip=True) or _weapon_name_from_href(href)
         clean_name = _clean_weapon_name(name)
         if clean_name:
-            links.setdefault(normalize_text(clean_name), urljoin(BASE_URL, href))
+            url = urljoin(BASE_URL, href)
+            links.setdefault(normalize_text(clean_name), url)
+            slug_name = _clean_weapon_name(_weapon_name_from_href(href))
+            if slug_name:
+                links.setdefault(normalize_text(slug_name), url)
     return links
+
+
+def _weapons_from_soup_links(soup: Any, game: str, limit: int) -> list[MetaWeapon]:
+    weapons: list[MetaWeapon] = []
+    seen: set[str] = set()
+    for anchor in soup.find_all("a", href=True):
+        href = anchor["href"]
+        if "/weapon/" not in href:
+            continue
+        url = urljoin(BASE_URL, href)
+        name = _clean_weapon_name(anchor.get_text(" ", strip=True) or _weapon_name_from_href(href))
+        normalized = normalize_text(name)
+        if not name or normalized in seen:
+            continue
+        seen.add(normalized)
+        weapons.append(
+            MetaWeapon(
+                name=name,
+                type="Meta",
+                pick="",
+                url=url,
+                game=game,
+            )
+        )
+        if len(weapons) >= limit:
+            break
+    return weapons
 
 
 def _parse_meta_lines(
@@ -331,17 +394,20 @@ def _parse_meta_lines(
         elif rank_only_re.match(clean_line) and index + 1 < len(lines):
             name = _clean_weapon_name(lines[index + 1])
             window_start = index + 2
+        elif _is_weapon_candidate(clean_line):
+            name = _clean_weapon_name(clean_line)
+            window_start = index + 1
         else:
             continue
 
         if not name or name in {"Warzone Meta", "MW3 Meta", "MW4 Meta"}:
             continue
 
-        window_end = _find_next_rank_index(lines, window_start, rank_re, rank_only_re)
+        window_end = _find_next_weapon_block_index(lines, window_start, rank_re, rank_only_re)
         window = [_clean_line(item) for item in lines[window_start:window_end]]
         category = _first_match(window, WEAPON_CLASSES)
         playstyle = _first_match(window, PLAYSTYLE_TYPES) or "Meta"
-        pick = _first_pattern(window, PICK_RE)
+        pick = _first_pick(window)
         code = _first_pattern(window, CODE_RE)
 
         seen_key = (normalize_text(name), normalize_text(playstyle))
@@ -354,7 +420,7 @@ def _parse_meta_lines(
             MetaWeapon(
                 name=name,
                 type=playstyle,
-                pick=pick.replace(" Pick", "") if pick else "",
+                pick=pick,
                 code=code,
                 category=category,
                 url=url,
@@ -384,6 +450,9 @@ def _parse_loadout_details(lines: list[str], weapon: MetaWeapon) -> tuple[str | 
             value = line.replace("Code:", "", 1).strip()
             if CODE_RE.match(value):
                 code = value
+            continue
+        if code is None and CODE_RE.match(line):
+            code = line
 
     try:
         attachments_index = block.index("Attachments")
@@ -406,15 +475,28 @@ def _find_best_loadout_index(lines: list[str], weapon: MetaWeapon) -> int | None
     wanted_type = normalize_text(weapon.type)
     wanted_name = normalize_text(weapon.name)
 
+    for index in range(0, len(lines) - 3):
+        if (
+            normalize_text(lines[index]) == "best"
+            and wanted_name in normalize_text(lines[index + 1])
+            and normalize_text(lines[index + 2]) == "loadoutfor"
+            and (wanted_type in normalize_text(lines[index + 3]) or not wanted_type)
+        ):
+            return max(0, index - 1)
+
+    for index in range(0, len(lines) - 3):
+        if (
+            normalize_text(lines[index]) == "best"
+            and wanted_name in normalize_text(lines[index + 1])
+            and normalize_text(lines[index + 2]) == "loadoutfor"
+        ):
+            return max(0, index - 1)
+
     for index, line in enumerate(lines):
         normalized = normalize_text(line)
         if "best" in normalized and "loadout" in normalized and wanted_name in normalized:
             if wanted_type in normalized or not wanted_type:
                 return index
-
-    for index, line in enumerate(lines):
-        if line == weapon.type:
-            return index
 
     return None
 
@@ -447,6 +529,28 @@ def _find_next_rank_index(
     return len(lines)
 
 
+def _find_next_weapon_block_index(
+    lines: list[str],
+    start_index: int,
+    rank_re: re.Pattern[str],
+    rank_only_re: re.Pattern[str],
+) -> int:
+    fallback_end = min(len(lines), start_index + 12)
+    for index in range(start_index, len(lines)):
+        line = _clean_line(lines[index])
+        if _is_meta_contenders_heading(line):
+            return index
+        if _is_meta_section_heading(line):
+            return index
+        if rank_re.match(line) or rank_only_re.match(line):
+            return index
+        if _is_weapon_candidate(line) and _has_weapon_data(lines[start_index:index]):
+            return index
+        if index >= fallback_end:
+            return fallback_end
+    return len(lines)
+
+
 def _selection_index(query: str) -> int | None:
     for word, number in ORDINALS.items():
         if normalize_text(word) in query:
@@ -465,6 +569,7 @@ def _clean_weapon_name(value: str) -> str:
     value = _clean_line(value)
     value = re.sub(r"^\d+\.\s*", "", value).strip()
     value = re.sub(r"^#+\s*", "", value).strip()
+    value = re.sub(r"\s+\d+(?:\.\d+)?%\s*Pick$", "", value, flags=re.IGNORECASE)
     value = re.sub(r"\s+(SMG|LMG|Assault Rifle|Sniper Rifle|Marksman Rifle|Shotgun)$", "", value)
     return value.strip()
 
@@ -477,13 +582,75 @@ def _clean_line(value: str) -> str:
 
 def _is_absolute_meta_heading(line: str, game: str) -> bool:
     normalized = normalize_text(line)
-    game_aliases = {"warzone"} if game == "warzone" else {"mw3", "mw4"}
+    if game == "warzone":
+        game_aliases = {"warzone"}
+    elif game == "ranked":
+        game_aliases = {"ranked", "warzoneranked"}
+    else:
+        game_aliases = {"mw3", "mw4"}
     return normalized.endswith("absolutemeta") and any(alias in normalized for alias in game_aliases)
+
+
+def _has_absolute_meta_heading(lines: list[str], game: str) -> bool:
+    return any(_is_absolute_meta_heading(_clean_line(line), game) for line in lines)
 
 
 def _is_meta_contenders_heading(line: str) -> bool:
     normalized = normalize_text(line)
     return normalized.endswith("metacontenders")
+
+
+def _is_meta_section_heading(line: str) -> bool:
+    normalized = normalize_text(line)
+    return normalized in {"warzonemeta", "mw3meta", "mw4meta"}
+
+
+def _is_weapon_candidate(line: str) -> bool:
+    if not line:
+        return False
+    if line in WEAPON_CLASSES or line in PLAYSTYLE_TYPES:
+        return False
+    if line in {"Category", "Pick", "EaseScore", "Last Updated"}:
+        return False
+    if line.startswith(("The Current", "Discover the current", "Last Updated:")):
+        return False
+    if _is_absolute_meta_heading(line, "warzone") or _is_absolute_meta_heading(line, "mw3"):
+        return False
+    if _is_meta_contenders_heading(line) or _is_meta_section_heading(line):
+        return False
+    if PICK_RE.match(line) or PICK_VALUE_RE.match(line) or CODE_RE.match(line):
+        return False
+    if re.match(r"^[\d.,]+$", line):
+        return False
+    return bool(re.search(r"[A-Za-z]", line))
+
+
+def _has_weapon_data(lines: list[str]) -> bool:
+    clean_lines = [_clean_line(line) for line in lines]
+    return any(
+        line in WEAPON_CLASSES
+        or line in PLAYSTYLE_TYPES
+        or PICK_RE.match(line)
+        or PICK_VALUE_RE.match(line)
+        or CODE_RE.match(line)
+        for line in clean_lines
+    )
+
+
+def _weapon_name_from_href(href: str) -> str:
+    slug = href.rstrip("/").split("/")[-1]
+    return " ".join(part.upper() if any(ch.isdigit() for ch in part) else part.capitalize() for part in slug.split("-"))
+
+
+def _first_pick(lines: list[str]) -> str:
+    for index, line in enumerate(lines):
+        if PICK_RE.match(line):
+            return line.replace(" Pick", "")
+        if PICK_VALUE_RE.match(line):
+            next_line = lines[index + 1] if index + 1 < len(lines) else ""
+            if next_line.lower() == "pick":
+                return line
+    return ""
 
 
 def _first_match(lines: list[str], values: set[str]) -> str | None:

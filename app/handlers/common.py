@@ -256,6 +256,11 @@ async def text_handler(
     chat_data = _chat_data(message)
     last_meta = chat_data.get("last_meta_weapons", [])
     selected_weapon = find_selected_weapon(text, last_meta)
+    game_choice = requested_game(text)
+
+    if chat_data.get("awaiting_meta_game") and game_choice:
+        await _handle_meta_request(message, text, chat_data, codmunity_client)
+        return
 
     if selected_weapon:
         await _handle_selected_weapon(message, selected_weapon, codmunity_client)
@@ -283,11 +288,22 @@ async def _handle_meta_request(
     chat_data: dict,
     codmunity_client: CodmunityClient,
 ) -> None:
+    game = requested_game(text)
+    if game is None:
+        chat_data["awaiting_meta_game"] = True
+        await message.reply("Qaysi meta kerak: Warzone, Ranked yoki MW3?")
+        return
+
+    chat_data.pop("awaiting_meta_game", None)
     status = await message.reply("CODMunity'dan meta ma'lumotni olyapman...")
 
     try:
-        game = requested_game(text)
-        weapons = codmunity_client.get_mw3_meta() if game == "mw3" else codmunity_client.get_warzone_meta()
+        if game == "mw3":
+            weapons = codmunity_client.get_mw3_meta()
+        elif game == "ranked":
+            weapons = codmunity_client.get_ranked_meta()
+        else:
+            weapons = codmunity_client.get_warzone_meta()
         chat_data["last_meta_weapons"] = [weapon.to_dict() for weapon in weapons]
         await status.edit_text(format_meta_list(weapons))
     except MetaEngineError as exc:
