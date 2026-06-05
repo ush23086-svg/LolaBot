@@ -98,7 +98,7 @@ def _reply_context(message: Message) -> str:
 
 def _wants_joke_video(text: str) -> bool:
     normalized = re.sub(r"[^a-zа-яё]+", "", text.lower())
-    return normalized in {"kul", "lolakul", "kulchi"}
+    return normalized in {"kul", "lolakul", "bittakul", "lolabittakul", "kulchi"}
 
 
 def _wants_song_video(text: str) -> bool:
