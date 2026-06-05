@@ -337,14 +337,12 @@ def _parse_meta_lines(
         if not name or name in {"Warzone Meta", "MW3 Meta", "MW4 Meta"}:
             continue
 
-        window = [_clean_line(item) for item in lines[window_start : window_start + 12]]
+        window_end = _find_next_rank_index(lines, window_start, rank_re, rank_only_re)
+        window = [_clean_line(item) for item in lines[window_start:window_end]]
         category = _first_match(window, WEAPON_CLASSES)
-        playstyle = _first_match(window, PLAYSTYLE_TYPES)
+        playstyle = _first_match(window, PLAYSTYLE_TYPES) or "Meta"
         pick = _first_pattern(window, PICK_RE)
         code = _first_pattern(window, CODE_RE)
-
-        if not playstyle or not pick:
-            continue
 
         seen_key = (normalize_text(name), normalize_text(playstyle))
         if seen_key in seen:
@@ -356,7 +354,7 @@ def _parse_meta_lines(
             MetaWeapon(
                 name=name,
                 type=playstyle,
-                pick=pick.replace(" Pick", ""),
+                pick=pick.replace(" Pick", "") if pick else "",
                 code=code,
                 category=category,
                 url=url,
@@ -428,6 +426,24 @@ def _find_next_boundary(lines: list[str], start_index: int) -> int:
             return index
         if index > start_index + 80:
             return index
+    return len(lines)
+
+
+def _find_next_rank_index(
+    lines: list[str],
+    start_index: int,
+    rank_re: re.Pattern[str],
+    rank_only_re: re.Pattern[str],
+) -> int:
+    fallback_end = min(len(lines), start_index + 12)
+    for index in range(start_index, len(lines)):
+        line = _clean_line(lines[index])
+        if _is_meta_contenders_heading(line):
+            return index
+        if rank_re.match(line) or rank_only_re.match(line):
+            return index
+        if index >= fallback_end:
+            return fallback_end
     return len(lines)
 
 
