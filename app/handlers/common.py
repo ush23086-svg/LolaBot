@@ -7,7 +7,7 @@ from datetime import timedelta
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import FSInputFile, Message
 
 from app.services.ai_provider import AIProvider
 from app.services.meta_engine import (
@@ -26,13 +26,14 @@ router = Router()
 logger = logging.getLogger(__name__)
 TELEGRAM_TEXT_LIMIT = 4096
 CHAT_DATA: dict[int, dict] = {}
+JOKE_VIDEO_FILENAME = "video_2026-05-31_21-36-53.mp4"
 
 GREETING_RE = re.compile(
     r"^\s*(salom|assalomu alaykum|assalom|hello|hi|privet|привет)\s*[!.?]*\s*$",
     re.IGNORECASE,
 )
 LOLA_PRESENCE_RE = re.compile(
-    r"^\s*lola\s*(\?|bormisan|shu yerdamisan|qayerdasan|eshityapsanmi)?\s*[!.?]*\s*$",
+    r"^\s*lola\s*(?:\?|bormisan\??|shu yerdamisan\??|qayerdasan\??|eshityapsanmi\??)?\s*$",
     re.IGNORECASE,
 )
 GREETINGS = ["Salom 😊", "Salom 🙂", "Salom."]
@@ -76,6 +77,11 @@ def _reply_context(message: Message) -> str:
     return f"Reply qilingan xabar ({sender}): {text.strip()}"
 
 
+def _wants_joke_video(text: str) -> bool:
+    normalized = re.sub(r"[^a-zа-яё]+", "", text.lower())
+    return normalized in {"kul", "lolakul", "kulchi"}
+
+
 async def _send_answer(message: Message, text: str, status: Message | None = None) -> None:
     parts = _chunks(text)
     if not parts:
@@ -88,6 +94,14 @@ async def _send_answer(message: Message, text: str, status: Message | None = Non
 
     for part in parts[1:]:
         await message.answer(part)
+
+
+async def _send_joke_video(message: Message) -> None:
+    try:
+        await message.answer_video(FSInputFile(JOKE_VIDEO_FILENAME))
+    except Exception:
+        logger.exception("Failed to send joke video")
+        await message.answer("Videoni yubora olmadim.")
 
 
 @router.message(CommandStart())
@@ -188,8 +202,8 @@ async def text_handler(
         await message.answer("Aniqroq yozing.")
         return
 
-    if "kul" in text.lower():
-        await message.answer("🙂")
+    if _wants_joke_video(text):
+        await _send_joke_video(message)
         return
 
     if GREETING_RE.match(text):
