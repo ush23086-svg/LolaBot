@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     @property
     def openrouter_vision_models(self) -> list[str]:
         models = [self.openrouter_vision_model_1, self.openrouter_vision_model_2]
-        return _clean_models(models) or self.openrouter_models
+        return _clean_models(models)
 
 
 def _clean_models(models: list[str | None]) -> list[str]:

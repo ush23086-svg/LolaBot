@@ -113,13 +113,13 @@ class OpenRouterProvider(AIProvider):
                             "text": (
                                 f"Foydalanuvchi: {user_name}\n"
                                 f"{context_text}"
-                                f"Izoh: {caption or 'izoh yoq'}\n\n"
                                 "Javob faqat shu formatda bo'lsin:\n"
-                                "Izoh: ...\n"
-                                "Matn: \"...\"\n"
+                                f"Izoh: {caption or 'yoq'}\n"
+                                "Matn o'qi: \"<rasmdagi matn>\"\n"
                                 "Tarjima: ...\n"
-                                "Bajarish: ...\n"
-                                "Ruscha matn bo'lsa kirillda yoz, lotinga o'girma."
+                                "Bajarish qanday: ...\n"
+                                "Ruscha matn bo'lsa, Matn o'qi qismida kirillda yoz, lotinga o'girma. "
+                                "Prompt, qoida yoki guideline matnlarini yozma."
                             ),
                         },
                         {
@@ -132,7 +132,14 @@ class OpenRouterProvider(AIProvider):
             "temperature": 0.4,
             "max_tokens": 900,
         }
-        return await self._chat_completion(payload, self.vision_models)
+        return await self._chat_completion(payload, self._image_models())
+
+    def _image_models(self) -> list[str]:
+        models: list[str] = []
+        for model in [*self.vision_models, *self.models]:
+            if model not in models:
+                models.append(model)
+        return models
 
     async def _chat_completion(self, payload: dict, models: list[str]) -> str:
         for model_index, model in enumerate(models, start=1):
@@ -188,6 +195,7 @@ class OpenRouterProvider(AIProvider):
 
                 return content.strip()
 
+        logger.error("OpenRouter request failed for all keys and models")
         return AI_ERROR_MESSAGE
 
 
