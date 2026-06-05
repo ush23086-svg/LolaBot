@@ -1,5 +1,5 @@
-import base64
 import asyncio
+import base64
 import logging
 import random
 import re
@@ -20,38 +20,23 @@ from app.services.meta_engine import (
     is_meta_request,
     requested_game,
 )
-from app.services.stats_service import (
-    StatsService,
-    format_stats,
-    today_key,
-)
+from app.services.stats_service import StatsService, format_stats, today_key
 
 router = Router()
 logger = logging.getLogger(__name__)
 TELEGRAM_TEXT_LIMIT = 4096
 CHAT_DATA: dict[int, dict] = {}
-GREETING_RE = re.compile(r"^\s*(salom|assalomu alaykum|assalom|hello|hi|privet|привет)\s*[!.?]*\s*$", re.IGNORECASE)
-GREETINGS = [
-    "Salom 😊",
-    "Xa, shu yerdaman 🙂",
-    "Keldingizmi 😄",
-    "Eshitaman.",
-]
-GREETING_RE = re.compile(r"^\s*(salom|assalomu alaykum|assalom|hello|hi|privet|привет)\s*[!.?]*\s*$", re.IGNORECASE)
-LOLA_PRESENCE_RE = re.compile(
-    r"\b(lola|lolajon|bormisan|shu yerdamisan|qayerdasan|qattasan|qayerda|eshityapsan)\b",
+
+GREETING_RE = re.compile(
+    r"^\s*(salom|assalomu alaykum|assalom|hello|hi|privet|привет)\s*[!.?]*\s*$",
     re.IGNORECASE,
 )
-GREETINGS = [
-    "Salom 😊",
-    "Salom 🙂",
-    "Salom.",
-]
-PRESENCE_REPLIES = [
-    "Xa, shu yerdaman 🙂",
-    "Eshitaman.",
-    "Shu yerdaman.",
-]
+LOLA_PRESENCE_RE = re.compile(
+    r"^\s*lola\s*(\?|bormisan|shu yerdamisan|qayerdasan|eshityapsanmi)?\s*[!.?]*\s*$",
+    re.IGNORECASE,
+)
+GREETINGS = ["Salom 😊", "Salom 🙂", "Salom."]
+PRESENCE_REPLIES = ["Xa, shu yerdaman 🙂", "Eshitaman.", "Shu yerdaman."]
 
 
 def _user_label(message: Message) -> str:
@@ -78,6 +63,17 @@ def _chunks(text: str, limit: int = TELEGRAM_TEXT_LIMIT) -> list[str]:
 
 def _chat_data(message: Message) -> dict:
     return CHAT_DATA.setdefault(message.chat.id, {})
+
+
+def _reply_context(message: Message) -> str:
+    reply = message.reply_to_message
+    if not reply:
+        return ""
+    text = reply.text or reply.caption or ""
+    if not text.strip():
+        return ""
+    sender = reply.from_user.full_name if reply.from_user else "oldingi xabar"
+    return f"Reply qilingan xabar ({sender}): {text.strip()}"
 
 
 async def _send_answer(message: Message, text: str, status: Message | None = None) -> None:
@@ -122,12 +118,7 @@ async def week_handler(message: Message, stats_service: StatsService) -> None:
 
     today = today_key()
     start_day = today - timedelta(days=today.weekday())
-    rows = await asyncio.to_thread(
-        stats_service.get_stats_range,
-        message.chat.id,
-        start_day,
-        today,
-    )
+    rows = await asyncio.to_thread(stats_service.get_stats_range, message.chat.id, start_day, today)
     if not rows:
         await message.answer("Bu hafta hali statistika yo'q.")
         return
@@ -144,12 +135,7 @@ async def month_handler(message: Message, stats_service: StatsService) -> None:
 
     today = today_key()
     start_day = today.replace(day=1)
-    rows = await asyncio.to_thread(
-        stats_service.get_stats_range,
-        message.chat.id,
-        start_day,
-        today,
-    )
+    rows = await asyncio.to_thread(stats_service.get_stats_range, message.chat.id, start_day, today)
     if not rows:
         await message.answer("Bu oy hali statistika yo'q.")
         return
@@ -175,11 +161,11 @@ async def photo_handler(message: Message, bot: Bot, ai_provider: AIProvider) -> 
             return
 
         image_base64 = base64.b64encode(buffer.read()).decode("ascii")
-        caption = message.caption or ""
         answer = await ai_provider.analyze_image(
             image_base64=image_base64,
             user_name=_user_label(message),
-            caption=caption,
+            caption=message.caption or "",
+            reply_context=_reply_context(message),
         )
         await _send_answer(message, answer, status=status)
     except Exception:
@@ -202,11 +188,15 @@ async def text_handler(
         await message.answer("Aniqroq yozing.")
         return
 
+    if "kul" in text.lower():
+        await message.answer("🙂")
+        return
+
     if GREETING_RE.match(text):
         await message.answer(random.choice(GREETINGS))
         return
 
-    if LOLA_PRESENCE_RE.search(text):
+    if LOLA_PRESENCE_RE.match(text):
         await message.answer(random.choice(PRESENCE_REPLIES))
         return
 
@@ -226,6 +216,7 @@ async def text_handler(
         answer = await ai_provider.ask_ai(
             text=text,
             user_name=_user_label(message),
+            reply_context=_reply_context(message),
         )
         await _send_answer(message, answer)
     except Exception:
@@ -243,11 +234,7 @@ async def _handle_meta_request(
 
     try:
         game = requested_game(text)
-        weapons = (
-            codmunity_client.get_mw3_meta()
-            if game == "mw3"
-            else codmunity_client.get_warzone_meta()
-        )
+        weapons = codmunity_client.get_mw3_meta() if game == "mw3" else codmunity_client.get_warzone_meta()
         chat_data["last_meta_weapons"] = [weapon.to_dict() for weapon in weapons]
         await status.edit_text(format_meta_list(weapons))
     except MetaEngineError as exc:

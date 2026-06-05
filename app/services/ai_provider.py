@@ -34,19 +34,31 @@ Muhim:
 
 class AIProvider(ABC):
     @abstractmethod
-    async def ask_ai(self, text: str, user_name: str) -> str:
+    async def ask_ai(self, text: str, user_name: str, reply_context: str = "") -> str:
         raise NotImplementedError
 
     @abstractmethod
-    async def analyze_image(self, image_base64: str, user_name: str, caption: str = "") -> str:
+    async def analyze_image(
+        self,
+        image_base64: str,
+        user_name: str,
+        caption: str = "",
+        reply_context: str = "",
+    ) -> str:
         raise NotImplementedError
 
 
 class NullAIProvider(AIProvider):
-    async def ask_ai(self, text: str, user_name: str) -> str:
+    async def ask_ai(self, text: str, user_name: str, reply_context: str = "") -> str:
         return AI_ERROR_MESSAGE
 
-    async def analyze_image(self, image_base64: str, user_name: str, caption: str = "") -> str:
+    async def analyze_image(
+        self,
+        image_base64: str,
+        user_name: str,
+        caption: str = "",
+        reply_context: str = "",
+    ) -> str:
         return AI_ERROR_MESSAGE
 
 
@@ -63,13 +75,17 @@ class OpenRouterProvider(AIProvider):
         self.vision_models = vision_models
         self.app_name = app_name
 
-    async def ask_ai(self, text: str, user_name: str) -> str:
+    async def ask_ai(self, text: str, user_name: str, reply_context: str = "") -> str:
+        user_content = f"Foydalanuvchi: {user_name}\n"
+        if reply_context:
+            user_content += f"{reply_context}\n"
+        user_content += f"Xabar: {text}"
         payload = {
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {
                     "role": "user",
-                    "content": f"Foydalanuvchi: {user_name}\nXabar: {text}",
+                    "content": user_content,
                 },
             ],
             "temperature": 0.6,
@@ -77,7 +93,14 @@ class OpenRouterProvider(AIProvider):
         }
         return await self._chat_completion(payload, self.models)
 
-    async def analyze_image(self, image_base64: str, user_name: str, caption: str = "") -> str:
+    async def analyze_image(
+        self,
+        image_base64: str,
+        user_name: str,
+        caption: str = "",
+        reply_context: str = "",
+    ) -> str:
+        context_text = f"{reply_context}\n" if reply_context else ""
         payload = {
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -88,12 +111,17 @@ class OpenRouterProvider(AIProvider):
                             "type": "text",
                             "text": (
                                 f"Foydalanuvchi: {user_name}\n"
+                                f"{context_text}"
                                 f"Izoh: {caption or 'izoh yoq'}\n\n"
-                                "Rasm yoki skrin ichidagi matnni o'qi. Ruscha yoki inglizcha "
-                                "bo'lsa, o'zbekchaga tarjima qil. Agar bu missiya, topshiriq, "
-                                "game objective, xatolik yoki yo'riqnoma bo'lsa, uni qanday "
-                                "bajarish kerakligini qisqa va aniq tushuntir. Matn ko'rinmasa, "
-                                "taxmin qilma."
+                                "Rasm yoki skrin ichidagi matnni o'qi.\n"
+                                "Agar ruscha matn bo'lsa:\n"
+                                "1. Avval asl ruscha matnni kirill yozuvida aynan qaytar.\n"
+                                "2. Ruscha matnni lotinga transliteratsiya qilma.\n"
+                                "3. Keyin o'zbekchaga tarjima qil.\n"
+                                "4. Oxirida qisqa maslahat ber.\n"
+                                "Agar inglizcha matn bo'lsa, asl matnni yoz, keyin o'zbekchaga tarjima qil.\n"
+                                "Agar bu missiya, topshiriq, game objective, xatolik yoki yo'riqnoma bo'lsa, "
+                                "qanday bajarish kerakligini qisqa tushuntir. Matn ko'rinmasa, taxmin qilma."
                             ),
                         },
                         {
