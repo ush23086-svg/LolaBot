@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 AI_ERROR_MESSAGE = "Hozir javob berishda muammo bo'ldi. Keyinroq urinib ko'ring."
+IMAGE_ERROR_MESSAGE = "Rasmni hozir o'qiy olmadim. Matnini yozib yuboring."
 
 SYSTEM_PROMPT = """
 Sen Lola ismli Telegram botisan.
@@ -60,7 +61,7 @@ class NullAIProvider(AIProvider):
         caption: str = "",
         reply_context: str = "",
     ) -> str:
-        return AI_ERROR_MESSAGE
+        return IMAGE_ERROR_MESSAGE
 
 
 class OpenRouterProvider(AIProvider):
@@ -101,6 +102,10 @@ class OpenRouterProvider(AIProvider):
         caption: str = "",
         reply_context: str = "",
     ) -> str:
+        if not self.vision_models:
+            logger.error("OpenRouter vision model is not configured")
+            return IMAGE_ERROR_MESSAGE
+
         context_text = f"{reply_context}\n" if reply_context else ""
         payload = {
             "messages": [
@@ -135,11 +140,7 @@ class OpenRouterProvider(AIProvider):
         return await self._chat_completion(payload, self._image_models())
 
     def _image_models(self) -> list[str]:
-        models: list[str] = []
-        for model in [*self.vision_models, *self.models]:
-            if model not in models:
-                models.append(model)
-        return models
+        return self.vision_models
 
     async def _chat_completion(self, payload: dict, models: list[str]) -> str:
         for model_index, model in enumerate(models, start=1):
@@ -195,7 +196,7 @@ class OpenRouterProvider(AIProvider):
 
                 return content.strip()
 
-        logger.error("OpenRouter request failed for all keys and models")
+        logger.error("OpenRouter request failed for all keys and models: %s", models)
         return AI_ERROR_MESSAGE
 
 

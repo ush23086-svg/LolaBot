@@ -32,6 +32,10 @@ class Settings(BaseSettings):
         default=None,
         alias="OPENROUTER_VISION_MODEL_2",
     )
+    openrouter_vision_model_3: str | None = Field(
+        default=None,
+        alias="OPENROUTER_VISION_MODEL_3",
+    )
     codmunity_timeout: int = Field(default=15, alias="CODMUNITY_TIMEOUT")
     bot_name: str = Field(default="Lola", alias="BOT_NAME")
 
@@ -73,7 +77,11 @@ class Settings(BaseSettings):
 
     @property
     def openrouter_vision_models(self) -> list[str]:
-        models = [self.openrouter_vision_model_1, self.openrouter_vision_model_2]
+        models = [
+            self.openrouter_vision_model_1,
+            self.openrouter_vision_model_2,
+            self.openrouter_vision_model_3,
+        ]
         return _clean_models(models)
 
 
