@@ -24,9 +24,12 @@ from app.services.stats_service import StatsService, format_stats, today_key
 
 router = Router()
 logger = logging.getLogger(__name__)
+
 TELEGRAM_TEXT_LIMIT = 4096
 CHAT_DATA: dict[int, dict] = {}
-JOKE_VIDEO_FILENAME = "video_2026-05-31_21-36-53.mp4"
+
+VIDEO_FILENAME = "SaveVid_Net_AQNKnUIQh4au0ukBFQeeBEE9GNtzkOFvNFXUDTipfHHr9qwI5m8RUCHhFxyUIY.mp4"
+VIDEO_SONG2_FILENAME = "video_2026-05-31_21-36-53.mp4"
 
 GREETING_RE = re.compile(
     r"^\s*(salom|assalomu alaykum|assalom|hello|hi|privet|привет)\s*[!.?]*\s*$",
@@ -51,9 +54,7 @@ def _user_display_name(message: Message) -> str:
     if not user:
         return ""
 
-    name = user.full_name or user.username or ""
-    name = name.strip().lstrip("@")
-    return name
+    return (user.full_name or user.username or "").strip().lstrip("@")
 
 
 def _greeting_for(message: Message) -> str:
@@ -86,9 +87,11 @@ def _reply_context(message: Message) -> str:
     reply = message.reply_to_message
     if not reply:
         return ""
+
     text = reply.text or reply.caption or ""
     if not text.strip():
         return ""
+
     sender = reply.from_user.full_name if reply.from_user else "oldingi xabar"
     return f"Reply qilingan xabar ({sender}): {text.strip()}"
 
@@ -96,6 +99,22 @@ def _reply_context(message: Message) -> str:
 def _wants_joke_video(text: str) -> bool:
     normalized = re.sub(r"[^a-zа-яё]+", "", text.lower())
     return normalized in {"kul", "lolakul", "kulchi"}
+
+
+def _wants_song_video(text: str) -> bool:
+    value = text.lower()
+    return any(
+        phrase in value
+        for phrase in (
+            "qo'shiq ayt",
+            "qoshiq ayt",
+            "ashula ayt",
+            "kuylab ber",
+            "qo'shiq tashla",
+            "qoshiq tashla",
+            "song ayt",
+        )
+    )
 
 
 async def _send_answer(message: Message, text: str, status: Message | None = None) -> None:
@@ -106,72 +125,72 @@ async def _send_answer(message: Message, text: str, status: Message | None = Non
     if status:
         await status.edit_text(parts[0])
     else:
-        await message.answer(parts[0])
+        await message.reply(parts[0])
 
     for part in parts[1:]:
-        await message.answer(part)
+        await message.reply(part)
 
 
-async def _send_joke_video(message: Message) -> None:
+async def _send_video_reply(message: Message, filename: str) -> None:
     try:
-        await message.answer_video(FSInputFile(JOKE_VIDEO_FILENAME))
+        await message.reply_video(FSInputFile(filename))
     except Exception:
-        logger.exception("Failed to send joke video")
-        await message.answer("Videoni yubora olmadim.")
+        logger.exception("Failed to send video %s", filename)
+        await message.reply("Videoni yubora olmadim.")
 
 
 @router.message(CommandStart())
 async def start_handler(message: Message) -> None:
-    await message.answer("Salom 😊 Bemalol yozing.")
+    await message.reply("Salom 😊 Bemalol yozing.")
 
 
 @router.message(Command("stats"))
 async def stats_handler(message: Message, stats_service: StatsService) -> None:
     if message.chat.type == "private":
-        await message.answer("Statistika faqat guruhlar uchun ishlaydi.")
+        await message.reply("Statistika faqat guruhlar uchun ishlaydi.")
         return
 
     rows = await asyncio.to_thread(stats_service.get_stats, message.chat.id, today_key())
     if not rows:
-        await message.answer("Bugun hali statistika yo'q.")
+        await message.reply("Bugun hali statistika yo'q.")
         return
 
     total = sum(int(row["count"]) for row in rows)
-    await message.answer(format_stats("Bugungi statistika", total, rows))
+    await message.reply(format_stats("Bugungi statistika", total, rows))
 
 
 @router.message(Command("week"))
 async def week_handler(message: Message, stats_service: StatsService) -> None:
     if message.chat.type == "private":
-        await message.answer("Haftalik statistika faqat guruhlar uchun ishlaydi.")
+        await message.reply("Haftalik statistika faqat guruhlar uchun ishlaydi.")
         return
 
     today = today_key()
     start_day = today - timedelta(days=today.weekday())
     rows = await asyncio.to_thread(stats_service.get_stats_range, message.chat.id, start_day, today)
     if not rows:
-        await message.answer("Bu hafta hali statistika yo'q.")
+        await message.reply("Bu hafta hali statistika yo'q.")
         return
 
     total = sum(int(row["count"]) for row in rows)
-    await message.answer(format_stats("Haftalik statistika", total, rows))
+    await message.reply(format_stats("Haftalik statistika", total, rows))
 
 
 @router.message(Command("month"))
 async def month_handler(message: Message, stats_service: StatsService) -> None:
     if message.chat.type == "private":
-        await message.answer("Oylik statistika faqat guruhlar uchun ishlaydi.")
+        await message.reply("Oylik statistika faqat guruhlar uchun ishlaydi.")
         return
 
     today = today_key()
     start_day = today.replace(day=1)
     rows = await asyncio.to_thread(stats_service.get_stats_range, message.chat.id, start_day, today)
     if not rows:
-        await message.answer("Bu oy hali statistika yo'q.")
+        await message.reply("Bu oy hali statistika yo'q.")
         return
 
     total = sum(int(row["count"]) for row in rows)
-    await message.answer(format_stats("Oylik statistika", total, rows))
+    await message.reply(format_stats("Oylik statistika", total, rows))
 
 
 @router.message(F.photo)
@@ -179,7 +198,7 @@ async def photo_handler(message: Message, bot: Bot, ai_provider: AIProvider) -> 
     if not await _should_answer(message, bot):
         return
 
-    status = await message.answer("Rasmni ko'rib chiqyapman...")
+    status = await message.reply("Rasmni ko'rib chiqyapman...")
 
     try:
         photo = message.photo[-1]
@@ -215,19 +234,23 @@ async def text_handler(
 
     text = message.text or ""
     if not text.strip():
-        await message.answer("Aniqroq yozing.")
+        await message.reply("Aniqroq yozing.")
         return
 
     if _wants_joke_video(text):
-        await _send_joke_video(message)
+        await _send_video_reply(message, VIDEO_FILENAME)
+        return
+
+    if _wants_song_video(text):
+        await _send_video_reply(message, VIDEO_SONG2_FILENAME)
         return
 
     if GREETING_RE.match(text):
-        await message.answer(_greeting_for(message))
+        await message.reply(_greeting_for(message))
         return
 
     if LOLA_PRESENCE_RE.match(text):
-        await message.answer(random.choice(PRESENCE_REPLIES))
+        await message.reply(random.choice(PRESENCE_REPLIES))
         return
 
     chat_data = _chat_data(message)
@@ -251,7 +274,7 @@ async def text_handler(
         await _send_answer(message, answer)
     except Exception:
         logger.exception("Text handling failed")
-        await message.answer("Hozir javob berishda muammo bo'ldi. Birozdan keyin urinib ko'ring.")
+        await message.reply("Hozir javob berishda muammo bo'ldi. Birozdan keyin urinib ko'ring.")
 
 
 async def _handle_meta_request(
@@ -260,7 +283,7 @@ async def _handle_meta_request(
     chat_data: dict,
     codmunity_client: CodmunityClient,
 ) -> None:
-    status = await message.answer("CODMunity'dan meta ma'lumotni olyapman...")
+    status = await message.reply("CODMunity'dan meta ma'lumotni olyapman...")
 
     try:
         game = requested_game(text)
@@ -279,7 +302,7 @@ async def _handle_selected_weapon(
     selected_weapon: MetaWeapon,
     codmunity_client: CodmunityClient,
 ) -> None:
-    status = await message.answer("CODMunity'dan loadoutni ochyapman...")
+    status = await message.reply("CODMunity'dan loadoutni ochyapman...")
 
     try:
         weapon = codmunity_client.get_weapon_loadout(selected_weapon)
