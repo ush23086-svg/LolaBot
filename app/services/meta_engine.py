@@ -281,9 +281,9 @@ def _visible_lines(soup: Any) -> list[str]:
         element.decompose()
 
     return [
-        line.strip().replace("\xa0", " ")
+        _clean_line(line)
         for line in soup.get_text("\n").splitlines()
-        if line.strip()
+        if _clean_line(line)
     ]
 
 
@@ -313,32 +313,31 @@ def _parse_meta_lines(
     seen: set[tuple[str, str]] = set()
 
     for index, line in enumerate(lines):
-        if line.startswith(f"{game.upper()} Absolute Meta") or line.startswith(
-            f"{game.capitalize()} Absolute Meta"
-        ):
+        clean_line = _clean_line(line)
+        if _is_absolute_meta_heading(clean_line, game):
             in_ranking = True
             continue
 
-        if in_ranking and line.startswith(("Warzone Meta Contenders", "MW3 Meta Contenders")):
+        if in_ranking and _is_meta_contenders_heading(clean_line):
             break
 
         if not in_ranking:
             continue
 
-        match = rank_re.match(line)
+        match = rank_re.match(clean_line)
         if match:
             name = _clean_weapon_name(match.group(1))
             window_start = index + 1
-        elif rank_only_re.match(line) and index + 1 < len(lines):
+        elif rank_only_re.match(clean_line) and index + 1 < len(lines):
             name = _clean_weapon_name(lines[index + 1])
             window_start = index + 2
         else:
             continue
 
-        if not name or name in {"Warzone Meta", "MW3 Meta"}:
+        if not name or name in {"Warzone Meta", "MW3 Meta", "MW4 Meta"}:
             continue
 
-        window = lines[window_start : window_start + 12]
+        window = [_clean_line(item) for item in lines[window_start : window_start + 12]]
         category = _first_match(window, WEAPON_CLASSES)
         playstyle = _first_match(window, PLAYSTYLE_TYPES)
         pick = _first_pattern(window, PICK_RE)
@@ -447,9 +446,28 @@ def _selection_index(query: str) -> int | None:
 
 
 def _clean_weapon_name(value: str) -> str:
+    value = _clean_line(value)
     value = re.sub(r"^\d+\.\s*", "", value).strip()
+    value = re.sub(r"^#+\s*", "", value).strip()
     value = re.sub(r"\s+(SMG|LMG|Assault Rifle|Sniper Rifle|Marksman Rifle|Shotgun)$", "", value)
     return value.strip()
+
+
+def _clean_line(value: str) -> str:
+    value = value.strip().replace("\xa0", " ")
+    value = re.sub(r"\s+", " ", value)
+    return re.sub(r"^#+\s*", "", value).strip()
+
+
+def _is_absolute_meta_heading(line: str, game: str) -> bool:
+    normalized = normalize_text(line)
+    game_aliases = {"warzone"} if game == "warzone" else {"mw3", "mw4"}
+    return normalized.endswith("absolutemeta") and any(alias in normalized for alias in game_aliases)
+
+
+def _is_meta_contenders_heading(line: str) -> bool:
+    normalized = normalize_text(line)
+    return normalized.endswith("metacontenders")
 
 
 def _first_match(lines: list[str], values: set[str]) -> str | None:
