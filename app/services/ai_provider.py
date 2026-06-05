@@ -51,14 +51,20 @@ class NullAIProvider(AIProvider):
 
 
 class OpenRouterProvider(AIProvider):
-    def __init__(self, api_keys: list[str], model: str, app_name: str) -> None:
+    def __init__(
+        self,
+        api_keys: list[str],
+        models: list[str],
+        vision_models: list[str],
+        app_name: str,
+    ) -> None:
         self.api_keys = api_keys
-        self.model = model
+        self.models = models
+        self.vision_models = vision_models
         self.app_name = app_name
 
     async def ask_ai(self, text: str, user_name: str) -> str:
         payload = {
-            "model": self.model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {
@@ -69,11 +75,10 @@ class OpenRouterProvider(AIProvider):
             "temperature": 0.6,
             "max_tokens": 700,
         }
-        return await self._chat_completion(payload)
+        return await self._chat_completion(payload, self.models)
 
     async def analyze_image(self, image_base64: str, user_name: str, caption: str = "") -> str:
         payload = {
-            "model": self.model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {
@@ -101,48 +106,61 @@ class OpenRouterProvider(AIProvider):
             "temperature": 0.4,
             "max_tokens": 900,
         }
-        return await self._chat_completion(payload)
+        return await self._chat_completion(payload, self.vision_models)
 
-    async def _chat_completion(self, payload: dict) -> str:
-        for key_index, api_key in enumerate(self.api_keys, start=1):
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "X-Title": self.app_name,
-            }
+    async def _chat_completion(self, payload: dict, models: list[str]) -> str:
+        for model_index, model in enumerate(models, start=1):
+            model_payload = {**payload, "model": model}
+            for key_index, api_key in enumerate(self.api_keys, start=1):
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "X-Title": self.app_name,
+                }
 
-            try:
-                timeout = aiohttp.ClientTimeout(total=60)
-                async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-                    async with session.post(OPENROUTER_CHAT_URL, json=payload) as response:
-                        data = await _response_data(response)
-                        if response.status >= 400:
-                            logger.warning(
-                                "OpenRouter key %s error %s: %s",
-                                key_index,
-                                response.status,
-                                data,
-                            )
-                            if _should_try_next_key(response.status, data):
-                                continue
-                            return AI_ERROR_MESSAGE
-            except aiohttp.ClientError as exc:
-                logger.exception("OpenRouter key %s request failed: %s", key_index, exc)
-                continue
-            except Exception as exc:
-                logger.exception("OpenRouter key %s unexpected failure: %s", key_index, exc)
-                continue
+                try:
+                    timeout = aiohttp.ClientTimeout(total=60)
+                    async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+                        async with session.post(OPENROUTER_CHAT_URL, json=model_payload) as response:
+                            data = await _response_data(response)
+                            if response.status >= 400:
+                                logger.warning(
+                                    "OpenRouter model %s key %s error %s: %s",
+                                    model_index,
+                                    key_index,
+                                    response.status,
+                                    data,
+                                )
+                                if _should_try_next_combination(response.status, data):
+                                    continue
+                                return AI_ERROR_MESSAGE
+                except aiohttp.ClientError as exc:
+                    logger.exception(
+                        "OpenRouter model %s key %s request failed: %s",
+                        model_index,
+                        key_index,
+                        exc,
+                    )
+                    continue
+                except Exception as exc:
+                    logger.exception(
+                        "OpenRouter model %s key %s unexpected failure: %s",
+                        model_index,
+                        key_index,
+                        exc,
+                    )
+                    continue
 
-            try:
-                content = data["choices"][0]["message"]["content"]
-            except (KeyError, IndexError, TypeError):
-                logger.warning("Unexpected OpenRouter response: %s", data)
-                return AI_ERROR_MESSAGE
+                try:
+                    content = data["choices"][0]["message"]["content"]
+                except (KeyError, IndexError, TypeError):
+                    logger.warning("Unexpected OpenRouter response: %s", data)
+                    return AI_ERROR_MESSAGE
 
-            if not content:
-                return AI_ERROR_MESSAGE
+                if not content:
+                    return AI_ERROR_MESSAGE
 
-            return content.strip()
+                return content.strip()
 
         return AI_ERROR_MESSAGE
 
@@ -153,16 +171,17 @@ def build_ai_provider(settings: Settings) -> AIProvider:
     if api_keys:
         return OpenRouterProvider(
             api_keys=api_keys,
-            model=settings.openrouter_model_name,
+            models=settings.openrouter_models,
+            vision_models=settings.openrouter_vision_models,
             app_name=settings.bot_name,
         )
 
     return NullAIProvider()
 
 
-def _should_try_next_key(status: int, data: Any) -> bool:
+def _should_try_next_combination(status: int, data: Any) -> bool:
     text = str(data).lower()
-    if status in {401, 402, 403, 429}:
+    if status in {401, 402, 403, 404, 429}:
         return True
     return any(
         phrase in text
@@ -175,6 +194,10 @@ def _should_try_next_key(status: int, data: Any) -> bool:
             "insufficient credit",
             "no credits",
             "credit balance",
+            "temporarily rate-limited",
+            "temporarily rate limited",
+            "temporarily unavailable",
+            "no endpoints found",
         )
     )
 

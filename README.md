@@ -5,8 +5,9 @@ LolaBot - Telegram uchun o'zbekcha yordamchi bot. Bot `aiogram` bilan ishlaydi, 
 ## Imkoniyatlar
 
 - Telegram bot `aiogram` 3 asosida ishlaydi.
-- OpenRouter API orqali Gemma free modeliga ulanadi.
+- OpenRouter API orqali Llama free text modeliga ulanadi.
 - `OPENROUTER_API_KEY_1/2/3` bo'yicha key rotation ishlaydi.
+- `OPENROUTER_MODEL_1/2/3` bo'yicha model fallback ishlaydi.
 - Default model: `meta-llama/llama-3.2-3b-instruct:free`.
 - Warzone/MW3 meta javoblari CODMunity parser + chat state orqali beriladi.
 - Guruhlarda xabar statistikasi: `/stats`, `/week`, `/month`.
@@ -90,6 +91,11 @@ OPENROUTER_API_KEY_1=
 OPENROUTER_API_KEY_2=
 OPENROUTER_API_KEY_3=
 OPENROUTER_MODEL=meta-llama/llama-3.2-3b-instruct:free
+OPENROUTER_MODEL_1=meta-llama/llama-3.2-3b-instruct:free
+OPENROUTER_MODEL_2=
+OPENROUTER_MODEL_3=
+OPENROUTER_VISION_MODEL_1=meta-llama/llama-3.2-11b-vision-instruct
+OPENROUTER_VISION_MODEL_2=
 ```
 
 Botni ishga tushirish:
@@ -109,6 +115,11 @@ OPENROUTER_API_KEY_1=
 OPENROUTER_API_KEY_2=
 OPENROUTER_API_KEY_3=
 OPENROUTER_MODEL=meta-llama/llama-3.2-3b-instruct:free
+OPENROUTER_MODEL_1=meta-llama/llama-3.2-3b-instruct:free
+OPENROUTER_MODEL_2=
+OPENROUTER_MODEL_3=
+OPENROUTER_VISION_MODEL_1=meta-llama/llama-3.2-11b-vision-instruct
+OPENROUTER_VISION_MODEL_2=
 ```
 
 Railway `python bot.py` komandasi bilan botni worker sifatida ishga tushiradi.

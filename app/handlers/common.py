@@ -37,6 +37,21 @@ GREETINGS = [
     "Keldingizmi 😄",
     "Eshitaman.",
 ]
+GREETING_RE = re.compile(r"^\s*(salom|assalomu alaykum|assalom|hello|hi|privet|привет)\s*[!.?]*\s*$", re.IGNORECASE)
+LOLA_PRESENCE_RE = re.compile(
+    r"\b(lola|lolajon|bormisan|shu yerdamisan|qayerdasan|qattasan|qayerda|eshityapsan)\b",
+    re.IGNORECASE,
+)
+GREETINGS = [
+    "Salom 😊",
+    "Salom 🙂",
+    "Salom.",
+]
+PRESENCE_REPLIES = [
+    "Xa, shu yerdaman 🙂",
+    "Eshitaman.",
+    "Shu yerdaman.",
+]
 
 
 def _user_label(message: Message) -> str:
@@ -189,6 +204,10 @@ async def text_handler(
 
     if GREETING_RE.match(text):
         await message.answer(random.choice(GREETINGS))
+        return
+
+    if LOLA_PRESENCE_RE.search(text):
+        await message.answer(random.choice(PRESENCE_REPLIES))
         return
 
     chat_data = _chat_data(message)
