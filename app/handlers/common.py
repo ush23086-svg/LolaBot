@@ -229,9 +229,6 @@ async def text_handler(
     ai_provider: AIProvider,
     codmunity_client: CodmunityClient,
 ) -> None:
-    if not await _should_answer(message, bot):
-        return
-
     text = message.text or ""
     if not text.strip():
         await message.reply("Aniqroq yozing.")
@@ -243,6 +240,9 @@ async def text_handler(
 
     if _wants_song_video(text):
         await _send_video_reply(message, VIDEO_SONG2_FILENAME)
+        return
+
+    if not await _should_answer(message, bot):
         return
 
     if GREETING_RE.match(text):
