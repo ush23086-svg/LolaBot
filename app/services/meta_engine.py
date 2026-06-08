@@ -13,6 +13,7 @@ BASE_URL = "https://codmunity.gg"
 WARZONE_META_URL = f"{BASE_URL}/warzone"
 MW3_META_URL = f"{BASE_URL}/mw3"
 RANKED_META_URL = f"{BASE_URL}/warzoneranked"
+META_NOT_FOUND_MESSAGE = "CODMunity'dan aniq meta topilmadi, keyinroq qayta urinib ko'ring."
 
 CODE_RE = re.compile(r"^[A-Z]\d{2}-[A-Z0-9]+(?:-[A-Z0-9]+){1,3}$")
 PICK_RE = re.compile(r"^\d+(?:\.\d+)?%\s*Pick$", re.IGNORECASE)
@@ -186,17 +187,11 @@ class CodmunityClient:
             heading_found,
         )
 
-        if not weapons:
-            weapons = _weapons_from_soup_links(soup, game=game, limit=limit)
-            logger.info(
-                "CODMunity %s fallback from weapon links: parsed_weapons=%s heading_found=%s",
-                game,
-                len(weapons),
-                heading_found,
-            )
+        if not heading_found:
+            raise MetaEngineError(META_NOT_FOUND_MESSAGE)
 
         if not weapons:
-            raise MetaEngineError("CODMunity'dan ma'lumot olishda muammo bo'ldi")
+            raise MetaEngineError(META_NOT_FOUND_MESSAGE)
 
         return weapons
 
@@ -334,33 +329,6 @@ def _weapon_links(soup: Any) -> dict[str, str]:
             if slug_name:
                 links.setdefault(normalize_text(slug_name), url)
     return links
-
-
-def _weapons_from_soup_links(soup: Any, game: str, limit: int) -> list[MetaWeapon]:
-    weapons: list[MetaWeapon] = []
-    seen: set[str] = set()
-    for anchor in soup.find_all("a", href=True):
-        href = anchor["href"]
-        if "/weapon/" not in href:
-            continue
-        url = urljoin(BASE_URL, href)
-        name = _clean_weapon_name(anchor.get_text(" ", strip=True) or _weapon_name_from_href(href))
-        normalized = normalize_text(name)
-        if not name or normalized in seen:
-            continue
-        seen.add(normalized)
-        weapons.append(
-            MetaWeapon(
-                name=name,
-                type="Meta",
-                pick="",
-                url=url,
-                game=game,
-            )
-        )
-        if len(weapons) >= limit:
-            break
-    return weapons
 
 
 def _parse_meta_lines(
