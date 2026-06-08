@@ -13,7 +13,11 @@ BASE_URL = "https://codmunity.gg"
 WARZONE_META_URL = f"{BASE_URL}/warzone"
 MW3_META_URL = f"{BASE_URL}/mw3"
 RANKED_META_URL = f"{BASE_URL}/warzoneranked"
-META_NOT_FOUND_MESSAGE = "CODMunity'dan aniq meta topilmadi, keyinroq qayta urinib ko'ring."
+WZSTATS_BASE_URL = "https://wzstats.gg"
+WZSTATS_WARZONE_META_URL = f"{WZSTATS_BASE_URL}/"
+WZSTATS_MW3_META_URL = f"{WZSTATS_BASE_URL}/mw3/meta"
+WZSTATS_RANKED_META_URL = f"{WZSTATS_BASE_URL}/warzone/meta/ranked"
+META_NOT_FOUND_MESSAGE = "Meta manbalaridan aniq ma'lumot topilmadi, keyinroq qayta urinib ko'ring."
 
 CODE_RE = re.compile(r"^[A-Z]\d{2}-[A-Z0-9]+(?:-[A-Z0-9]+){1,3}$")
 PICK_RE = re.compile(r"^\d+(?:\.\d+)?%\s*Pick$", re.IGNORECASE)
@@ -97,6 +101,7 @@ class MetaWeapon:
     category: str | None = None
     url: str | None = None
     game: str = "warzone"
+    source: str = "CODMunity"
     attachments: list[Attachment] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -108,6 +113,7 @@ class MetaWeapon:
             "category": self.category,
             "url": self.url,
             "game": self.game,
+            "source": self.source,
             "attachments": [attachment.__dict__ for attachment in self.attachments],
         }
 
@@ -121,6 +127,7 @@ class MetaWeapon:
             category=data.get("category"),
             url=data.get("url"),
             game=data.get("game", "warzone"),
+            source=data.get("source", "CODMunity"),
             attachments=[
                 Attachment(slot=item["slot"], name=item["name"])
                 for item in data.get("attachments", [])
@@ -148,13 +155,28 @@ class CodmunityClient:
         )
 
     def get_warzone_meta(self, limit: int = 6) -> list[MetaWeapon]:
-        return self._get_meta(WARZONE_META_URL, game="warzone", limit=limit)
+        return self._get_meta_with_fallback(
+            codmunity_url=WARZONE_META_URL,
+            wzstats_url=WZSTATS_WARZONE_META_URL,
+            game="warzone",
+            limit=limit,
+        )
 
     def get_mw3_meta(self, limit: int = 6) -> list[MetaWeapon]:
-        return self._get_meta(MW3_META_URL, game="mw3", limit=limit)
+        return self._get_meta_with_fallback(
+            codmunity_url=MW3_META_URL,
+            wzstats_url=WZSTATS_MW3_META_URL,
+            game="mw3",
+            limit=limit,
+        )
 
     def get_ranked_meta(self, limit: int = 6) -> list[MetaWeapon]:
-        return self._get_meta(RANKED_META_URL, game="ranked", limit=limit)
+        return self._get_meta_with_fallback(
+            codmunity_url=RANKED_META_URL,
+            wzstats_url=WZSTATS_RANKED_META_URL,
+            game="ranked",
+            limit=limit,
+        )
 
     def get_weapon_loadout(self, weapon: MetaWeapon) -> MetaWeapon:
         if not weapon.url:
@@ -171,7 +193,25 @@ class CodmunityClient:
         weapon.attachments = attachments
         return weapon
 
-    def _get_meta(self, url: str, game: str, limit: int) -> list[MetaWeapon]:
+    def _get_meta_with_fallback(
+        self,
+        codmunity_url: str,
+        wzstats_url: str,
+        game: str,
+        limit: int,
+    ) -> list[MetaWeapon]:
+        try:
+            return self._get_codmunity_meta(codmunity_url, game=game, limit=limit)
+        except MetaEngineError as exc:
+            logger.warning("CODMunity %s meta failed, trying WZStatsGG: %s", game, exc)
+
+        try:
+            return self._get_wzstats_meta(wzstats_url, game=game, limit=limit)
+        except MetaEngineError as exc:
+            logger.warning("WZStatsGG %s meta failed: %s", game, exc)
+            raise MetaEngineError(META_NOT_FOUND_MESSAGE) from exc
+
+    def _get_codmunity_meta(self, url: str, game: str, limit: int) -> list[MetaWeapon]:
         soup = self._fetch_soup(url)
         links = _weapon_links(soup)
         lines = _visible_lines(soup)
@@ -193,6 +233,14 @@ class CodmunityClient:
         if not weapons:
             raise MetaEngineError(META_NOT_FOUND_MESSAGE)
 
+        return weapons
+
+    def _get_wzstats_meta(self, url: str, game: str, limit: int) -> list[MetaWeapon]:
+        soup = self._fetch_soup(url)
+        weapons = _parse_wzstats_meta(soup, game=game, limit=limit)
+        logger.info("WZStatsGG %s meta parse: parsed_weapons=%s", game, len(weapons))
+        if not weapons:
+            raise MetaEngineError(META_NOT_FOUND_MESSAGE)
         return weapons
 
     def _fetch_soup(self, url: str) -> Any:
@@ -264,7 +312,8 @@ def normalize_text(value: str) -> str:
 
 
 def format_meta_list(weapons: list[MetaWeapon]) -> str:
-    lines = ["CODMunity bo'yicha hozirgi meta:"]
+    source = weapons[0].source if weapons else "CODMunity"
+    lines = [f"Manba: {source}", "Hozirgi meta:"]
     for index, weapon in enumerate(weapons, start=1):
         pick = f" - {weapon.pick}" if weapon.pick else ""
         lines.append(f"{index}. {weapon.name} - {weapon.type}{pick}")
@@ -273,7 +322,7 @@ def format_meta_list(weapons: list[MetaWeapon]) -> str:
 
 
 def format_weapon_loadout(weapon: MetaWeapon) -> str:
-    lines = [f"{weapon.name} - {weapon.type}"]
+    lines = [f"Manba: {weapon.source}", f"{weapon.name} - {weapon.type}"]
     if weapon.pick:
         lines.append(f"Pick rate: {weapon.pick}")
     if weapon.code:
@@ -329,6 +378,46 @@ def _weapon_links(soup: Any) -> dict[str, str]:
             if slug_name:
                 links.setdefault(normalize_text(slug_name), url)
     return links
+
+
+def _parse_wzstats_meta(soup: Any, game: str, limit: int) -> list[MetaWeapon]:
+    weapons: list[MetaWeapon] = []
+    seen: set[str] = set()
+
+    for container in soup.select(".loadout-container"):
+        anchor = container.select_one("a.sr-only[href]")
+        if not anchor:
+            continue
+
+        href = anchor.get("href", "")
+        if "/best-loadouts/" not in href:
+            continue
+
+        name = _wzstats_weapon_name(container, anchor)
+        normalized = normalize_text(name)
+        if not name or normalized in seen:
+            continue
+
+        tags = [_clean_line(tag.get_text(" ", strip=True)) for tag in container.select(".loadout-tag")]
+        category = _wzstats_category(tags)
+        playstyle = _wzstats_playstyle(tags) or "Meta"
+
+        seen.add(normalized)
+        weapons.append(
+            MetaWeapon(
+                name=name,
+                type=playstyle,
+                pick="",
+                category=category,
+                url=urljoin(WZSTATS_BASE_URL, href),
+                game=game,
+                source="WZStatsGG",
+            )
+        )
+        if len(weapons) >= limit:
+            break
+
+    return weapons
 
 
 def _parse_meta_lines(
@@ -425,7 +514,7 @@ def _parse_loadout_details(lines: list[str], weapon: MetaWeapon) -> tuple[str | 
     try:
         attachments_index = block.index("Attachments")
     except ValueError:
-        return code, []
+        return code, _parse_attachment_pairs(block)
 
     attachment_lines = block[attachments_index + 1 :]
     for index in range(0, len(attachment_lines) - 1, 2):
@@ -439,9 +528,43 @@ def _parse_loadout_details(lines: list[str], weapon: MetaWeapon) -> tuple[str | 
     return code, attachments
 
 
+def _parse_attachment_pairs(lines: list[str]) -> list[Attachment]:
+    attachments: list[Attachment] = []
+    for index in range(0, len(lines) - 1):
+        name = lines[index]
+        slot = lines[index + 1]
+        if slot not in ATTACHMENT_SLOTS or not _looks_like_attachment_name(name):
+            continue
+        attachments.append(Attachment(slot=slot, name=_format_attachment_name(name)))
+        if len(attachments) >= 5:
+            break
+    return attachments
+
+
+def _looks_like_attachment_name(value: str) -> bool:
+    if not value or value in ATTACHMENT_SLOTS:
+        return False
+    if value in {"Recommended", "Not Unlocked?", "Armory", "Code"}:
+        return False
+    if value.startswith(("Level ", "Best ", "Loadout", "Warzone", "Black Ops")):
+        return False
+    return any(ch.isdigit() for ch in value) or value.isupper()
+
+
+def _format_attachment_name(value: str) -> str:
+    if value.isupper():
+        return value.title()
+    return value
+
+
 def _find_best_loadout_index(lines: list[str], weapon: MetaWeapon) -> int | None:
     wanted_type = normalize_text(weapon.type)
     wanted_name = normalize_text(weapon.name)
+
+    for index, line in enumerate(lines):
+        normalized = normalize_text(line)
+        if "best" in normalized and "loadoutfor" in normalized and wanted_name in normalized:
+            return index
 
     for index in range(0, len(lines) - 3):
         if (
@@ -465,6 +588,11 @@ def _find_best_loadout_index(lines: list[str], weapon: MetaWeapon) -> int | None
         if "best" in normalized and "loadout" in normalized and wanted_name in normalized:
             if wanted_type in normalized or not wanted_type:
                 return index
+
+    for index, line in enumerate(lines):
+        normalized = normalize_text(line)
+        if "best" in normalized and "loadout" in normalized and wanted_name in normalized:
+            return index
 
     return None
 
@@ -632,4 +760,49 @@ def _first_pattern(lines: list[str], pattern: re.Pattern[str]) -> str | None:
     for line in lines:
         if pattern.match(line):
             return line
+    return None
+
+
+def _wzstats_weapon_name(container: Any, anchor: Any) -> str:
+    name_node = container.select_one(".loadout-content-name")
+    if name_node:
+        for child in name_node.find_all(True):
+            text = _clean_line(child.get_text(" ", strip=True))
+            if text and not _wzstats_ignored_name_text(text):
+                return _clean_weapon_name(text)
+
+    text = anchor.get_text(" ", strip=True)
+    match = re.search(r"Get all the best (.+?) builds", text, flags=re.IGNORECASE)
+    if match:
+        return _clean_weapon_name(match.group(1))
+    return _clean_weapon_name(_weapon_name_from_href(anchor.get("href", "")))
+
+
+def _wzstats_ignored_name_text(text: str) -> bool:
+    return text in {"Buff", "Nerf", "Update"} or text.startswith("#")
+
+
+def _wzstats_category(tags: list[str]) -> str | None:
+    for tag in tags:
+        normalized = normalize_text(tag)
+        if tag in WEAPON_CLASSES:
+            return tag
+        if normalized in {"ar", "assaultrifle"}:
+            return "Assault Rifle"
+        if normalized in {"br", "battlerifle"}:
+            return "Battle Rifle"
+        if normalized in {"marksman"}:
+            return "Marksman Rifle"
+        if normalized in {"sniper"}:
+            return "Sniper Rifle"
+        if normalized == "smg":
+            return "SMG"
+    return None
+
+
+def _wzstats_playstyle(tags: list[str]) -> str | None:
+    for tag in tags:
+        clean_tag = re.sub(r"^#?\d+\s*", "", tag).strip()
+        if clean_tag in PLAYSTYLE_TYPES:
+            return clean_tag
     return None
