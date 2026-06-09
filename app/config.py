@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     openrouter_api_key_1: str | None = Field(default=None, alias="OPENROUTER_API_KEY_1")
     openrouter_api_key_2: str | None = Field(default=None, alias="OPENROUTER_API_KEY_2")
     openrouter_api_key_3: str | None = Field(default=None, alias="OPENROUTER_API_KEY_3")
+    openrouter_api_key_4: str | None = Field(default=None, alias="OPENROUTER_API_KEY_4")
+    openrouter_api_key_5: str | None = Field(default=None, alias="OPENROUTER_API_KEY_5")
     openrouter_model: str = Field(
         default=OPENROUTER_DEFAULT_MODEL,
         alias="OPENROUTER_MODEL",
@@ -64,6 +66,8 @@ class Settings(BaseSettings):
             self.openrouter_api_key_1,
             self.openrouter_api_key_2,
             self.openrouter_api_key_3,
+            self.openrouter_api_key_4,
+            self.openrouter_api_key_5,
         ]
         clean_keys: list[str] = []
         seen: set[str] = set()

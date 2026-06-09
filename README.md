@@ -6,7 +6,7 @@ LolaBot - Telegram uchun o'zbekcha yordamchi bot. Bot `aiogram` bilan ishlaydi, 
 
 - Telegram bot `aiogram` 3 asosida ishlaydi.
 - OpenRouter API orqali free text modeliga ulanadi.
-- `OPENROUTER_API_KEY_1/2/3` bo'yicha key rotation ishlaydi.
+- `OPENROUTER_API_KEY_1/2/3/4/5` bo'yicha key rotation ishlaydi.
 - `OPENROUTER_MODEL_1/2/3` bo'yicha model fallback ishlaydi.
 - Rasmda faqat `OPENROUTER_VISION_MODEL_1/2/3` ishlaydi.
 - `/image <prompt>` orqali OpenRouter image model bilan rasm yaratadi.
@@ -94,9 +94,11 @@ DATABASE_URL=
 OPENROUTER_API_KEY_1=
 OPENROUTER_API_KEY_2=
 OPENROUTER_API_KEY_3=
+OPENROUTER_API_KEY_4=
+OPENROUTER_API_KEY_5=
 OPENROUTER_MODEL=google/gemma-4-31b-it:free
 OPENROUTER_MODEL_1=google/gemma-4-31b-it:free
-OPENROUTER_MODEL_2=
+OPENROUTER_MODEL_2=nex-agi/nex-n2-pro:free
 OPENROUTER_MODEL_3=
 OPENROUTER_VISION_MODEL_1=
 OPENROUTER_VISION_MODEL_2=
@@ -121,9 +123,11 @@ DATABASE_URL=
 OPENROUTER_API_KEY_1=
 OPENROUTER_API_KEY_2=
 OPENROUTER_API_KEY_3=
+OPENROUTER_API_KEY_4=
+OPENROUTER_API_KEY_5=
 OPENROUTER_MODEL=google/gemma-4-31b-it:free
 OPENROUTER_MODEL_1=google/gemma-4-31b-it:free
-OPENROUTER_MODEL_2=
+OPENROUTER_MODEL_2=nex-agi/nex-n2-pro:free
 OPENROUTER_MODEL_3=
 OPENROUTER_VISION_MODEL_1=
 OPENROUTER_VISION_MODEL_2=
