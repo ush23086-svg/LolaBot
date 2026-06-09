@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import base64
 import logging
 from abc import ABC, abstractmethod
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Callable
 
 import aiohttp
 
@@ -13,6 +15,7 @@ logger = logging.getLogger(__name__)
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 AI_ERROR_MESSAGE = "Hozir javob berishda muammo bo'ldi. Keyinroq urinib ko'ring."
 IMAGE_ERROR_MESSAGE = "Rasmni ko'rish modeli ulanmagan. OPENROUTER_VISION_MODEL_1 qo'shing."
+IMAGE_GENERATION_ERROR_MESSAGE = "Rasm yaratishda muammo bo'ldi. Keyinroq urinib ko'ring."
 
 SYSTEM_PROMPT = """
 Sen Lola ismli Telegram botisan.
@@ -47,6 +50,13 @@ Muhim:
 """.strip()
 
 
+@dataclass
+class GeneratedImage:
+    data: bytes | None = None
+    mime_type: str = "image/png"
+    error: str | None = None
+
+
 class AIProvider(ABC):
     @abstractmethod
     async def ask_ai(self, text: str, user_name: str, reply_context: str = "") -> str:
@@ -60,6 +70,10 @@ class AIProvider(ABC):
         caption: str = "",
         reply_context: str = "",
     ) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def generate_image(self, prompt: str, user_name: str) -> GeneratedImage:
         raise NotImplementedError
 
 
@@ -76,6 +90,9 @@ class NullAIProvider(AIProvider):
     ) -> str:
         return IMAGE_ERROR_MESSAGE
 
+    async def generate_image(self, prompt: str, user_name: str) -> GeneratedImage:
+        return GeneratedImage(error=IMAGE_GENERATION_ERROR_MESSAGE)
+
 
 class OpenRouterProvider(AIProvider):
     def __init__(
@@ -83,11 +100,13 @@ class OpenRouterProvider(AIProvider):
         api_keys: list[str],
         models: list[str],
         vision_models: list[str],
+        image_models: list[str],
         app_name: str,
     ) -> None:
         self.api_keys = api_keys
         self.models = models
         self.vision_models = vision_models
+        self.image_models = image_models
         self.app_name = app_name
 
     async def ask_ai(self, text: str, user_name: str, reply_context: str = "") -> str:
@@ -159,7 +178,68 @@ class OpenRouterProvider(AIProvider):
     def _image_models(self) -> list[str]:
         return self.vision_models
 
+    async def generate_image(self, prompt: str, user_name: str) -> GeneratedImage:
+        payload = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        f"Foydalanuvchi: {user_name}\n"
+                        f"Rasm prompti: {prompt.strip()}"
+                    ),
+                }
+            ],
+            "modalities": ["image"],
+            "image_config": {
+                "aspect_ratio": "1:1",
+                "image_size": "1K",
+            },
+            "stream": False,
+        }
+        data = await self._completion_data(
+            payload,
+            self.image_models,
+            operation="image_generation",
+            validator=_has_generated_image,
+        )
+        if data is None:
+            return GeneratedImage(error=IMAGE_GENERATION_ERROR_MESSAGE)
+
+        image = _extract_generated_image(data)
+        if image is None:
+            logger.warning("OpenRouter image generation returned no image: %s", data)
+            return GeneratedImage(error=IMAGE_GENERATION_ERROR_MESSAGE)
+
+        return image
+
     async def _chat_completion(self, payload: dict, models: list[str]) -> str:
+        data = await self._completion_data(
+            payload,
+            models,
+            operation="chat",
+            validator=_has_text_content,
+        )
+        if data is None:
+            return AI_ERROR_MESSAGE
+
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            logger.warning("Unexpected OpenRouter response: %s", data)
+            return AI_ERROR_MESSAGE
+
+        if not content:
+            return AI_ERROR_MESSAGE
+
+        return content.strip()
+
+    async def _completion_data(
+        self,
+        payload: dict,
+        models: list[str],
+        operation: str,
+        validator: Callable[[Any], bool] | None = None,
+    ) -> Any | None:
         for model_index, model in enumerate(models, start=1):
             model_payload = {**payload, "model": model}
             for key_index, api_key in enumerate(self.api_keys, start=1):
@@ -177,7 +257,8 @@ class OpenRouterProvider(AIProvider):
                             if response.status >= 400:
                                 rate_headers = _rate_limit_headers(response)
                                 logger.warning(
-                                    "OpenRouter model=%s model_index=%s key_index=%s status=%s rate=%s error=%s",
+                                    "OpenRouter operation=%s model=%s model_index=%s key_index=%s status=%s rate=%s error=%s",
+                                    operation,
                                     model,
                                     model_index,
                                     key_index,
@@ -185,20 +266,22 @@ class OpenRouterProvider(AIProvider):
                                     rate_headers,
                                     data,
                                 )
-                                if _should_try_next_combination(response.status, data):
-                                    _log_next_rotation(
-                                        model=model,
-                                        model_index=model_index,
-                                        models=models,
-                                        key_index=key_index,
-                                        keys_count=len(self.api_keys),
-                                        reason=_rotation_reason(response.status, data, rate_headers),
-                                    )
-                                    continue
-                                return AI_ERROR_MESSAGE
+                                reason = _rotation_reason(response.status, data, rate_headers)
+                                if not _should_try_next_combination(response.status, data):
+                                    reason = f"non-retryable {reason}"
+                                _log_next_rotation(
+                                    model=model,
+                                    model_index=model_index,
+                                    models=models,
+                                    key_index=key_index,
+                                    keys_count=len(self.api_keys),
+                                    reason=reason,
+                                )
+                                continue
                 except aiohttp.ClientError as exc:
                     logger.exception(
-                        "OpenRouter model=%s model_index=%s key_index=%s request failed: %s",
+                        "OpenRouter operation=%s model=%s model_index=%s key_index=%s request failed: %s",
+                        operation,
                         model,
                         model_index,
                         key_index,
@@ -207,7 +290,8 @@ class OpenRouterProvider(AIProvider):
                     continue
                 except Exception as exc:
                     logger.exception(
-                        "OpenRouter model=%s model_index=%s key_index=%s unexpected failure: %s",
+                        "OpenRouter operation=%s model=%s model_index=%s key_index=%s unexpected failure: %s",
+                        operation,
                         model,
                         model_index,
                         key_index,
@@ -215,19 +299,29 @@ class OpenRouterProvider(AIProvider):
                     )
                     continue
 
-                try:
-                    content = data["choices"][0]["message"]["content"]
-                except (KeyError, IndexError, TypeError):
-                    logger.warning("Unexpected OpenRouter response: %s", data)
-                    return AI_ERROR_MESSAGE
+                if validator is not None and not validator(data):
+                    logger.warning(
+                        "OpenRouter operation=%s model=%s model_index=%s key_index=%s invalid response: %s",
+                        operation,
+                        model,
+                        model_index,
+                        key_index,
+                        data,
+                    )
+                    _log_next_rotation(
+                        model=model,
+                        model_index=model_index,
+                        models=models,
+                        key_index=key_index,
+                        keys_count=len(self.api_keys),
+                        reason="invalid response",
+                    )
+                    continue
 
-                if not content:
-                    return AI_ERROR_MESSAGE
+                return data
 
-                return content.strip()
-
-        logger.error("OpenRouter request failed for all keys and models: %s", models)
-        return AI_ERROR_MESSAGE
+        logger.error("OpenRouter operation=%s failed for all keys and models: %s", operation, models)
+        return None
 
 
 def build_ai_provider(settings: Settings) -> AIProvider:
@@ -238,6 +332,7 @@ def build_ai_provider(settings: Settings) -> AIProvider:
             api_keys=api_keys,
             models=settings.openrouter_models,
             vision_models=settings.openrouter_vision_models,
+            image_models=settings.image_models,
             app_name=settings.bot_name,
         )
 
@@ -262,6 +357,7 @@ def _should_try_next_combination(status: int, data: Any) -> bool:
             "temporarily rate-limited",
             "temporarily rate limited",
             "temporarily unavailable",
+            "free-models-per-day",
             "no endpoints found",
         )
     )
@@ -347,3 +443,51 @@ async def _response_data(response: aiohttp.ClientResponse) -> Any:
         return await response.json(content_type=None)
     except Exception:
         return await response.text()
+
+
+def _extract_generated_image(data: Any) -> GeneratedImage | None:
+    try:
+        message = data["choices"][0]["message"]
+    except (KeyError, IndexError, TypeError):
+        return None
+
+    images = message.get("images") if isinstance(message, dict) else None
+    if not images:
+        return None
+
+    for image in images:
+        image_url = image.get("image_url") if isinstance(image, dict) else None
+        url = image_url.get("url") if isinstance(image_url, dict) else None
+        generated = _image_from_data_url(url)
+        if generated:
+            return generated
+
+    return None
+
+
+def _has_text_content(data: Any) -> bool:
+    try:
+        content = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        return False
+    return bool(content)
+
+
+def _has_generated_image(data: Any) -> bool:
+    return _extract_generated_image(data) is not None
+
+
+def _image_from_data_url(url: str | None) -> GeneratedImage | None:
+    if not url or not url.startswith("data:image/"):
+        return None
+
+    header, _, encoded = url.partition(",")
+    if not encoded:
+        return None
+
+    mime_type = header.removeprefix("data:").split(";", 1)[0] or "image/png"
+    try:
+        return GeneratedImage(data=base64.b64decode(encoded), mime_type=mime_type)
+    except Exception:
+        logger.exception("Failed to decode generated image data URL")
+        return None

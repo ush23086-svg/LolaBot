@@ -4,6 +4,10 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 OPENROUTER_DEFAULT_MODEL = "google/gemma-4-31b-it:free"
+OPENROUTER_DEFAULT_IMAGE_MODELS = [
+    "sourceful/riverflow-v2.5-pro:free",
+    "sourceful/riverflow-v2.5-fast:free",
+]
 OPENROUTER_LEGACY_MODEL_ALIASES = {
     "google/gemma-3-27b-it:free": OPENROUTER_DEFAULT_MODEL,
     "google/gemma-3n-e4b-it:free": OPENROUTER_DEFAULT_MODEL,
@@ -35,6 +39,14 @@ class Settings(BaseSettings):
     openrouter_vision_model_3: str | None = Field(
         default=None,
         alias="OPENROUTER_VISION_MODEL_3",
+    )
+    image_model_1: str | None = Field(
+        default=OPENROUTER_DEFAULT_IMAGE_MODELS[0],
+        alias="IMAGE_MODEL_1",
+    )
+    image_model_2: str | None = Field(
+        default=OPENROUTER_DEFAULT_IMAGE_MODELS[1],
+        alias="IMAGE_MODEL_2",
     )
     codmunity_timeout: int = Field(default=15, alias="CODMUNITY_TIMEOUT")
     bot_name: str = Field(default="Lola", alias="BOT_NAME")
@@ -83,6 +95,10 @@ class Settings(BaseSettings):
             self.openrouter_vision_model_3,
         ]
         return _clean_models(models)
+
+    @property
+    def image_models(self) -> list[str]:
+        return _clean_models([self.image_model_1, self.image_model_2]) or OPENROUTER_DEFAULT_IMAGE_MODELS
 
 
 def _clean_models(models: list[str | None]) -> list[str]:

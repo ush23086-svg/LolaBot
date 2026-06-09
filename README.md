@@ -9,6 +9,8 @@ LolaBot - Telegram uchun o'zbekcha yordamchi bot. Bot `aiogram` bilan ishlaydi, 
 - `OPENROUTER_API_KEY_1/2/3` bo'yicha key rotation ishlaydi.
 - `OPENROUTER_MODEL_1/2/3` bo'yicha model fallback ishlaydi.
 - Rasmda faqat `OPENROUTER_VISION_MODEL_1/2/3` ishlaydi.
+- `/image <prompt>` orqali OpenRouter image model bilan rasm yaratadi.
+- `IMAGE_MODEL_1/2` bo'yicha image model fallback ishlaydi.
 - Default model: `google/gemma-4-31b-it:free`.
 - Warzone/MW3 meta javoblari CODMunity parser + chat state orqali beriladi.
 - Guruhlarda xabar statistikasi: `/stats`, `/week`, `/month`.
@@ -63,6 +65,7 @@ Buyruqlar:
 /stats
 /week
 /month
+/image quyosh botayotgan shahar
 ```
 
 ## Local ishga tushirish
@@ -98,6 +101,8 @@ OPENROUTER_MODEL_3=
 OPENROUTER_VISION_MODEL_1=
 OPENROUTER_VISION_MODEL_2=
 OPENROUTER_VISION_MODEL_3=
+IMAGE_MODEL_1=sourceful/riverflow-v2.5-pro:free
+IMAGE_MODEL_2=sourceful/riverflow-v2.5-fast:free
 ```
 
 Botni ishga tushirish:
@@ -123,6 +128,8 @@ OPENROUTER_MODEL_3=
 OPENROUTER_VISION_MODEL_1=
 OPENROUTER_VISION_MODEL_2=
 OPENROUTER_VISION_MODEL_3=
+IMAGE_MODEL_1=sourceful/riverflow-v2.5-pro:free
+IMAGE_MODEL_2=sourceful/riverflow-v2.5-fast:free
 ```
 
 Railway `python bot.py` komandasi bilan botni worker sifatida ishga tushiradi.

@@ -7,7 +7,7 @@ from datetime import timedelta
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import FSInputFile, Message
+from aiogram.types import BufferedInputFile, FSInputFile, Message
 
 from app.services.ai_provider import AIProvider
 from app.services.meta_engine import (
@@ -191,6 +191,33 @@ async def month_handler(message: Message, stats_service: StatsService) -> None:
 
     total = sum(int(row["count"]) for row in rows)
     await message.reply(format_stats("Oylik statistika", total, rows))
+
+
+@router.message(Command("image"))
+async def image_command_handler(message: Message, ai_provider: AIProvider) -> None:
+    prompt = (message.text or "").partition(" ")[2].strip()
+    if not prompt:
+        await message.reply("Rasm uchun prompt yozing: /image quyosh botayotgan shahar")
+        return
+
+    status = await message.reply("Rasm yaratyapman...")
+    try:
+        result = await ai_provider.generate_image(prompt=prompt, user_name=_user_label(message))
+        if result.data:
+            await message.reply_photo(
+                BufferedInputFile(result.data, filename="lola_image.png"),
+                caption="Tayyor.",
+            )
+            try:
+                await status.delete()
+            except Exception:
+                logger.debug("Failed to delete image generation status message")
+            return
+
+        await status.edit_text(result.error or "Rasm yaratishda muammo bo'ldi.")
+    except Exception:
+        logger.exception("Image generation failed")
+        await status.edit_text("Rasm yaratishda muammo bo'ldi. Keyinroq urinib ko'ring.")
 
 
 @router.message(F.photo)
