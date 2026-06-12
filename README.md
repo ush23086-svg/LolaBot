@@ -1,6 +1,6 @@
 # LolaBot
 
-LolaBot - Telegram uchun o'zbekcha yordamchi bot. Bot `aiogram` bilan ishlaydi, AI javoblar uchun OpenRouter chat completions API’dan foydalanadi va Warzone/MW3 meta ma'lumotlarini AI’dan emas, CODMunity parseridan oladi.
+LolaBot - Telegram uchun o'zbekcha yordamchi bot. Bot `aiogram` bilan ishlaydi, AI javoblar uchun OpenRouter chat completions API’dan foydalanadi va Warzone/MW3 meta ma'lumotlarini AI’dan emas, meta parserlardan oladi.
 
 ## Imkoniyatlar
 
@@ -12,10 +12,11 @@ LolaBot - Telegram uchun o'zbekcha yordamchi bot. Bot `aiogram` bilan ishlaydi, 
 - `/image <prompt>` orqali OpenRouter image model bilan rasm yaratadi.
 - `IMAGE_MODEL_1/2` bo'yicha image model fallback ishlaydi.
 - Default model: `google/gemma-4-31b-it:free`.
-- Warzone/MW3 meta javoblari CODMunity parser + chat state orqali beriladi.
+- Warzone/MW3 meta javoblari CODMunity parser + WZStatsGG fallback + chat state orqali beriladi.
+- `MAIN_GROUP_ID` berilsa, asosiy guruh bot javob limitidan ozod bo'ladi.
 - Guruhlarda xabar statistikasi: `/stats`, `/week`, `/month`.
 - Har kuni 08:00 da guruhlarga kechagi daily report yuboradi.
-- CODMunity'dan weapon name, type, pick rate, code va attachmentlar olinadi.
+- CODMunity yoki WZStatsGG'dan weapon name, type, pick rate, code va attachmentlar olinadi.
 - Parser data topolmasa bot taxmin qilmaydi.
 - Railway deploy uchun `Procfile` va `railway.toml` tayyor.
 - API keylar kodga yozilmaydi, faqat `.env` yoki Railway variables orqali olinadi.
@@ -42,22 +43,22 @@ LolaBot - Telegram uchun o'zbekcha yordamchi bot. Bot `aiogram` bilan ishlaydi, 
 ## Meta logika
 
 1. User `Warzone meta kerak` yoki `MW3 meta` deb yozadi.
-2. Bot CODMunity sahifasini parser qiladi.
+2. Bot avval CODMunity sahifasini parser qiladi, topolmasa WZStatsGG fallback ishlaydi.
 3. Natija chat state ichida `last_meta_weapons` sifatida saqlanadi.
 4. User `2 ni ber`, `ikkinchisini och`, `kogotni taxlab ber`, `mk.78` kabi yozsa, bot oxirgi ro'yxatdan qurolni tanlaydi.
 5. Attachment kerak bo'lsa, tanlangan qurol sahifasi ochilib, loadout attachmentlari parser bilan olinadi.
 
-Bot hech qachon eski yoki taxminiy meta aytmaydi. CODMunity ishlamasa yoki parser kerakli data topolmasa:
+Bot hech qachon eski yoki taxminiy meta aytmaydi. CODMunity va WZStatsGG kerakli data topolmasa:
 
 ```text
-CODMunity'dan ma'lumot olishda muammo bo'ldi
+Meta manbalaridan aniq ma'lumot topilmadi, keyinroq qayta urinib ko'ring.
 ```
 
 deb javob beradi.
 
 ## Statistika
 
-Bot guruhlarda barcha xabarlarni sanaydi. Oddiy xabarlarga javob bermaydi; Lola bilan gaplashish uchun guruhda uning xabariga reply qilish kerak. Statistika uchun PostgreSQL `DATABASE_URL` kerak.
+Bot guruhlarda barcha xabarlarni sanaydi. Oddiy xabarlarga javob bermaydi; Lola bilan gaplashish uchun guruhda uning xabariga reply qilish kerak. Statistika, memory va kunlik limitlar uchun PostgreSQL `DATABASE_URL` kerak. Private chat kuniga 10 ta, boshqa guruhlar kuniga 9 ta bepul bot javobidan foydalanadi. `MAIN_GROUP_ID` asosiy guruhni bepul qiladi.
 
 Buyruqlar:
 
@@ -91,6 +92,7 @@ pip install -r requirements.txt
 ```env
 TELEGRAM_BOT_TOKEN=
 DATABASE_URL=
+MAIN_GROUP_ID=
 OPENROUTER_API_KEY_1=
 OPENROUTER_API_KEY_2=
 OPENROUTER_API_KEY_3=
@@ -120,6 +122,7 @@ Railway variables bo'limiga quyidagilarni kiriting:
 ```env
 TELEGRAM_BOT_TOKEN=
 DATABASE_URL=
+MAIN_GROUP_ID=
 OPENROUTER_API_KEY_1=
 OPENROUTER_API_KEY_2=
 OPENROUTER_API_KEY_3=

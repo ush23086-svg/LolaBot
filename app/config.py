@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     )
     codmunity_timeout: int = Field(default=15, alias="CODMUNITY_TIMEOUT")
     bot_name: str = Field(default="Lola", alias="BOT_NAME")
+    main_group_id: int | None = Field(default=None, alias="MAIN_GROUP_ID")
 
     model_config = SettingsConfigDict(
         env_file=".env",

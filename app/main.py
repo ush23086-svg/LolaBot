@@ -22,7 +22,7 @@ async def main() -> None:
     )
     dp = Dispatcher()
 
-    stats_service = StatsService(settings.database_url)
+    stats_service = StatsService(settings.database_url, main_group_id=settings.main_group_id)
     try:
         await asyncio.to_thread(stats_service.init_db)
     except Exception:

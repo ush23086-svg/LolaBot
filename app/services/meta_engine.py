@@ -17,7 +17,10 @@ WZSTATS_BASE_URL = "https://wzstats.gg"
 WZSTATS_WARZONE_META_URL = f"{WZSTATS_BASE_URL}/"
 WZSTATS_MW3_META_URL = f"{WZSTATS_BASE_URL}/mw3/meta"
 WZSTATS_RANKED_META_URL = f"{WZSTATS_BASE_URL}/warzone/meta/ranked"
+WZSTATS_RESURGENCE_META_URL = f"{WZSTATS_BASE_URL}/warzone/meta/resurgence"
+WZSTATS_RESURGENCE_RANKED_META_URL = f"{WZSTATS_BASE_URL}/warzone/meta/ranked/resurgence"
 META_NOT_FOUND_MESSAGE = "Meta manbalaridan aniq ma'lumot topilmadi, keyinroq qayta urinib ko'ring."
+LOADOUT_NOT_FOUND_MESSAGE = "Aniq ma'lumot topolmadim."
 
 CODE_RE = re.compile(r"^[A-Z]\d{2}-[A-Z0-9]+(?:-[A-Z0-9]+){1,3}$")
 PICK_RE = re.compile(r"^\d+(?:\.\d+)?%\s*Pick$", re.IGNORECASE)
@@ -171,27 +174,53 @@ class CodmunityClient:
         )
 
     def get_ranked_meta(self, limit: int = 6) -> list[MetaWeapon]:
-        return self._get_meta_with_fallback(
-            codmunity_url=RANKED_META_URL,
-            wzstats_url=WZSTATS_RANKED_META_URL,
-            game="ranked",
+        return self.get_br_ranked_meta(limit)
+
+    def get_br_ranked_meta(self, limit: int = 6) -> list[MetaWeapon]:
+        return self._get_wzstats_meta(WZSTATS_RANKED_META_URL, game="br_ranked", limit=limit)
+
+    def get_resurgence_ranked_meta(self, limit: int = 6) -> list[MetaWeapon]:
+        return self._get_wzstats_meta(
+            WZSTATS_RESURGENCE_RANKED_META_URL,
+            game="resurgence_ranked",
             limit=limit,
         )
 
+    def get_resurgence_meta(self, limit: int = 6) -> list[MetaWeapon]:
+        return self._get_wzstats_meta(WZSTATS_RESURGENCE_META_URL, game="resurgence", limit=limit)
+
+    def get_battle_royale_meta(self, limit: int = 6) -> list[MetaWeapon]:
+        return self.get_warzone_meta(limit)
+
     def get_weapon_loadout(self, weapon: MetaWeapon) -> MetaWeapon:
         if not weapon.url:
-            raise MetaEngineError("CODMunity'dan ma'lumot olishda muammo bo'ldi")
+            raise MetaEngineError(LOADOUT_NOT_FOUND_MESSAGE)
 
         soup = self._fetch_soup(weapon.url)
         lines = _visible_lines(soup)
         code, attachments = _parse_loadout_details(lines, weapon)
 
         if not code and not attachments:
-            raise MetaEngineError("CODMunity'dan ma'lumot olishda muammo bo'ldi")
+            raise MetaEngineError(LOADOUT_NOT_FOUND_MESSAGE)
 
         weapon.code = code or weapon.code
         weapon.attachments = attachments
         return weapon
+
+    def get_named_weapon_loadout(self, text: str) -> MetaWeapon:
+        name = _weapon_name_from_request(text)
+        if not name:
+            raise MetaEngineError(LOADOUT_NOT_FOUND_MESSAGE)
+
+        weapon = MetaWeapon(
+            name=name,
+            type="Loadout",
+            pick="",
+            url=f"{WZSTATS_BASE_URL}/best-loadouts/{_slugify_weapon_name(name)}",
+            game="warzone",
+            source="WZStatsGG",
+        )
+        return self.get_weapon_loadout(weapon)
 
     def _get_meta_with_fallback(
         self,
@@ -255,8 +284,8 @@ class CodmunityClient:
             response = self.session.get(url, timeout=self.timeout)
             response.raise_for_status()
         except self.requests.RequestException as exc:
-            logger.warning("CODMunity request failed: %s", exc)
-            raise MetaEngineError("CODMunity'dan ma'lumot olishda muammo bo'ldi") from exc
+            logger.warning("Meta source request failed url=%s: %s", url, exc)
+            raise MetaEngineError(META_NOT_FOUND_MESSAGE) from exc
 
         return BeautifulSoup(response.text, "html.parser")
 
@@ -271,6 +300,14 @@ def get_mw3_meta(limit: int = 6, timeout: int = 15) -> list[dict]:
 
 def get_ranked_meta(limit: int = 6, timeout: int = 15) -> list[dict]:
     return [weapon.to_dict() for weapon in CodmunityClient(timeout).get_ranked_meta(limit)]
+
+
+def get_br_ranked_meta(limit: int = 6, timeout: int = 15) -> list[dict]:
+    return [weapon.to_dict() for weapon in CodmunityClient(timeout).get_br_ranked_meta(limit)]
+
+
+def get_resurgence_ranked_meta(limit: int = 6, timeout: int = 15) -> list[dict]:
+    return [weapon.to_dict() for weapon in CodmunityClient(timeout).get_resurgence_ranked_meta(limit)]
 
 
 def find_selected_weapon(text: str, weapons: Iterable[dict | MetaWeapon]) -> MetaWeapon | None:
@@ -338,15 +375,37 @@ def format_weapon_loadout(weapon: MetaWeapon) -> str:
 
 def is_meta_request(text: str) -> bool:
     query = normalize_text(text)
-    return "meta" in query or any(key in query for key in ("warzoneloadout", "mw3loadout", "rankedloadout"))
+    return "meta" in query or any(
+        key in query
+        for key in (
+            "warzoneloadout",
+            "mw3loadout",
+            "rankedloadout",
+            "resurgenceloadout",
+            "battleroyaleloadout",
+        )
+    )
+
+
+def is_loadout_request(text: str) -> bool:
+    query = normalize_text(text)
+    return any(key in query for key in ("loadout", "taxlab", "build", "klass", "class"))
 
 
 def requested_game(text: str) -> str | None:
     query = normalize_text(text)
     if "mw3" in query:
         return "mw3"
+    if ("resurgence" in query or "rezurgence" in query) and ("ranked" in query or "rank" in query):
+        return "resurgence_ranked"
+    if ("br" in query or "battleroyale" in query) and ("ranked" in query or "rank" in query):
+        return "br_ranked"
     if "ranked" in query or "rank" in query:
         return "ranked"
+    if "resurgence" in query or "rezurgence" in query:
+        return "resurgence"
+    if "battleroyale" in query or query == "br":
+        return "battle_royale"
     if "warzone" in query or "warzoneloadout" in query:
         return "warzone"
     return None
@@ -736,6 +795,24 @@ def _has_weapon_data(lines: list[str]) -> bool:
 def _weapon_name_from_href(href: str) -> str:
     slug = href.rstrip("/").split("/")[-1]
     return " ".join(part.upper() if any(ch.isdigit() for ch in part) else part.capitalize() for part in slug.split("-"))
+
+
+def _weapon_name_from_request(text: str) -> str | None:
+    value = re.sub(
+        r"\b(loadout|build|klass|class|taxlab|ber|kerak|meta|qurol|weapon|gun|uchun|lola)\b",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(r"\s+", " ", value).strip(" .,!?:;")
+    return value or None
+
+
+def _slugify_weapon_name(name: str) -> str:
+    value = unicodedata.normalize("NFKD", name.lower())
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    value = value.replace("'", "")
+    return re.sub(r"[^a-z0-9]+", "-", value).strip("-")
 
 
 def _first_pick(lines: list[str]) -> str:

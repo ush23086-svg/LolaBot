@@ -14,8 +14,9 @@ TZ = ZoneInfo("Asia/Tashkent")
 
 
 class StatsService:
-    def __init__(self, database_url: str | None) -> None:
+    def __init__(self, database_url: str | None, main_group_id: int | None = None) -> None:
         self.database_url = database_url
+        self.main_group_id = main_group_id
 
     @property
     def enabled(self) -> bool:
@@ -51,6 +52,28 @@ class StatsService:
                     );
                     """
                 )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS bot_memory (
+                        chat_id BIGINT NOT NULL,
+                        user_id BIGINT NOT NULL,
+                        summary TEXT NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        PRIMARY KEY(chat_id, user_id)
+                    );
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS bot_usage_limits (
+                        chat_id BIGINT NOT NULL,
+                        user_id BIGINT NOT NULL,
+                        day DATE NOT NULL,
+                        count INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY(chat_id, user_id, day)
+                    );
+                    """
+                )
             conn.commit()
 
     def add_message_stat(self, chat_id: int, user_id: int, user_name: str) -> None:
@@ -71,6 +94,67 @@ class StatsService:
                     (chat_id, user_id, user_name, today_key()),
                 )
             conn.commit()
+
+    def use_bot_quota(self, chat_id: int, user_id: int, chat_type: str) -> tuple[bool, int, int]:
+        if not self.enabled:
+            return True, 0, 0
+
+        if chat_type != "private" and self.main_group_id and chat_id == self.main_group_id:
+            return True, 0, 0
+
+        limit = 10 if chat_type == "private" else 9
+        day = today_key()
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO bot_usage_limits (chat_id, user_id, day, count)
+                    VALUES (%s, %s, %s, 1)
+                    ON CONFLICT (chat_id, user_id, day)
+                    DO UPDATE SET count = bot_usage_limits.count + 1
+                    RETURNING count;
+                    """,
+                    (chat_id, user_id, day),
+                )
+                count = int(cur.fetchone()["count"])
+            conn.commit()
+
+        return count <= limit, count, limit
+
+    def update_memory(self, chat_id: int, user_id: int, summary: str) -> None:
+        if not self.enabled or not summary.strip():
+            return
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO bot_memory (chat_id, user_id, summary, updated_at)
+                    VALUES (%s, %s, %s, NOW())
+                    ON CONFLICT (chat_id, user_id)
+                    DO UPDATE SET summary = EXCLUDED.summary, updated_at = NOW();
+                    """,
+                    (chat_id, user_id, summary[:1200]),
+                )
+            conn.commit()
+
+    def get_memory(self, chat_id: int, user_id: int) -> str | None:
+        if not self.enabled:
+            return None
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT summary
+                    FROM bot_memory
+                    WHERE chat_id = %s AND user_id = %s;
+                    """,
+                    (chat_id, user_id),
+                )
+                row = cur.fetchone()
+                return row["summary"] if row else None
 
     def get_stats(self, chat_id: int, day) -> list[dict]:
         if not self.enabled:
