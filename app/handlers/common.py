@@ -7,8 +7,18 @@ from datetime import timedelta
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BufferedInputFile, FSInputFile, Message
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    FSInputFile,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    LabeledPrice,
+    Message,
+    PreCheckoutQuery,
+)
 
+from app.config import Settings
 from app.services.ai_provider import AIProvider
 from app.services.meta_engine import (
     CodmunityClient,
@@ -31,6 +41,22 @@ CHAT_DATA: dict[int, dict] = {}
 
 VIDEO_FILENAME = "SaveVid_Net_AQNKnUIQh4au0ukBFQeeBEE9GNtzkOFvNFXUDTipfHHr9qwI5m8RUCHhFxyUIY.mp4"
 VIDEO_SONG2_FILENAME = "video_2026-05-31_21-36-53.mp4"
+PREMIUM_PLANS = {
+    "test": {
+        "title": "Lola Premium - 1 kun test",
+        "description": "1 kun premium kirish.",
+        "label": "1 kun test",
+        "stars": 29,
+        "days": 1,
+    },
+    "month": {
+        "title": "Lola Premium - 1 oy",
+        "description": "30 kun premium kirish.",
+        "label": "1 oy premium",
+        "stars": 399,
+        "days": 30,
+    },
+}
 
 GREETING_RE = re.compile(
     r"^\s*(salom|assalomu alaykum|assalom|hello|hi|privet|привет)\s*[!.?]*\s*$",
@@ -163,7 +189,14 @@ async def _check_usage_limit(message: Message, stats_service: StatsService) -> b
     if allowed:
         return True
 
-    await message.reply(f"Bugungi bepul limit tugadi ({limit} ta). Davom etish uchun premium kerak.")
+    if message.chat.type == "private":
+        await message.reply(
+            f"Bugungi bepul limit tugadi ({limit} ta). Davom etish uchun /premium kerak."
+        )
+    else:
+        await message.reply(
+            f"Bugungi bepul limit tugadi ({limit} ta). Premium olish uchun private chatda /premium yozing."
+        )
     logger.info(
         "Bot quota exceeded chat=%s user=%s count=%s limit=%s",
         message.chat.id,
@@ -172,6 +205,56 @@ async def _check_usage_limit(message: Message, stats_service: StatsService) -> b
         limit,
     )
     return False
+
+
+def _premium_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="1 kun test - 29 Stars",
+                    callback_data="premium:test",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="1 oy premium - 399 Stars",
+                    callback_data="premium:month",
+                )
+            ],
+        ]
+    )
+
+
+async def _send_premium_invoice(message: Message, plan_key: str) -> None:
+    plan = PREMIUM_PLANS.get(plan_key)
+    if not plan:
+        await message.reply("Tarif topilmadi.")
+        return
+
+    await message.answer_invoice(
+        title=plan["title"],
+        description=plan["description"],
+        payload=f"premium:{plan_key}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label=plan["label"], amount=plan["stars"])],
+        reply_to_message_id=message.message_id,
+    )
+
+
+def _is_owner(message: Message, settings: Settings) -> bool:
+    return bool(
+        settings.owner_id
+        and message.from_user
+        and message.from_user.id == settings.owner_id
+    )
+
+
+def _format_dt(value) -> str:
+    if not value:
+        return "yo'q"
+    return value.astimezone().strftime("%Y-%m-%d %H:%M")
 
 
 def _memory_summary(user_text: str, answer: str) -> str:
@@ -265,6 +348,182 @@ async def month_handler(message: Message, stats_service: StatsService) -> None:
 
     total = sum(int(row["count"]) for row in rows)
     await message.reply(format_stats("Oylik statistika", total, rows))
+
+
+@router.message(Command("premium"))
+async def premium_handler(message: Message) -> None:
+    if message.chat.type != "private":
+        await message.reply("Premium olish uchun menga private chatda /premium yozing.")
+        return
+
+    await message.reply(
+        "Premium tariflar:\n\n"
+        "1 kun test - 29 Stars\n"
+        "1 oy premium - 399 Stars",
+        reply_markup=_premium_keyboard(),
+    )
+
+
+@router.message(Command("premium_test"))
+async def premium_test_handler(message: Message) -> None:
+    if message.chat.type != "private":
+        await message.reply("Premium olish uchun private chatda /premium_test yozing.")
+        return
+
+    await _send_premium_invoice(message, "test")
+
+
+@router.message(Command("premium_month"))
+async def premium_month_handler(message: Message) -> None:
+    if message.chat.type != "private":
+        await message.reply("Premium olish uchun private chatda /premium_month yozing.")
+        return
+
+    await _send_premium_invoice(message, "month")
+
+
+@router.callback_query(F.data.startswith("premium:"))
+async def premium_callback_handler(callback: CallbackQuery) -> None:
+    if not callback.message:
+        await callback.answer()
+        return
+
+    plan_key = (callback.data or "").split(":", 1)[1]
+    await callback.answer()
+    await _send_premium_invoice(callback.message, plan_key)
+
+
+@router.pre_checkout_query()
+async def pre_checkout_handler(query: PreCheckoutQuery) -> None:
+    payload = query.invoice_payload or ""
+    plan_key = payload.removeprefix("premium:")
+    if plan_key not in PREMIUM_PLANS:
+        await query.answer(ok=False, error_message="Tarif topilmadi.")
+        return
+
+    await query.answer(ok=True)
+
+
+@router.message(F.successful_payment)
+async def successful_payment_handler(message: Message, stats_service: StatsService) -> None:
+    payment = message.successful_payment
+    user = message.from_user
+    if not payment or not user:
+        return
+
+    payload = payment.invoice_payload or ""
+    plan_key = payload.removeprefix("premium:")
+    plan = PREMIUM_PLANS.get(plan_key)
+    if not plan:
+        await message.reply("To'lov qabul qilindi, lekin tarif topilmadi.")
+        return
+
+    try:
+        premium_until = await asyncio.to_thread(
+            stats_service.record_payment,
+            user.id,
+            user.full_name or user.username or "foydalanuvchi",
+            user.username,
+            plan_key,
+            payment.total_amount,
+            payload,
+            payment.telegram_payment_charge_id,
+            payment.provider_payment_charge_id,
+            plan["days"],
+        )
+    except Exception:
+        logger.exception("Failed to record successful payment for user %s", user.id)
+        await message.reply("To'lov qabul qilindi. Premiumni yoqishda muammo bo'ldi, egasiga yozing.")
+        return
+
+    if premium_until is None:
+        logger.error("Payment accepted but DATABASE_URL is not configured")
+        await message.reply("To'lov qabul qilindi. Premiumni yoqishda muammo bo'ldi, egasiga yozing.")
+        return
+
+    await message.reply(f"Premium yoqildi. Amal qilish muddati: {_format_dt(premium_until)}")
+
+
+@router.message(Command("income"))
+async def income_handler(message: Message, stats_service: StatsService, settings: Settings) -> None:
+    if message.chat.type != "private" or not _is_owner(message, settings):
+        return
+
+    summary = await asyncio.to_thread(stats_service.get_income_summary)
+    await message.reply(
+        "Daromad:\n"
+        f"To'lovlar: {summary['payments']} ta\n"
+        f"Stars: {summary['stars']}"
+    )
+
+
+@router.message(Command("paid"))
+async def paid_handler(message: Message, stats_service: StatsService, settings: Settings) -> None:
+    if message.chat.type != "private" or not _is_owner(message, settings):
+        return
+
+    rows = await asyncio.to_thread(stats_service.get_recent_payments, 10)
+    if not rows:
+        await message.reply("Hali to'lov yo'q.")
+        return
+
+    lines = ["Oxirgi to'lovlar:"]
+    for row in rows:
+        username = f" @{row['username']}" if row.get("username") else ""
+        lines.append(
+            f"- {row['user_name']}{username}: {row['plan']} - {row['stars']} Stars"
+        )
+    await message.reply("\n".join(lines))
+
+
+@router.message(Command("users"))
+async def users_handler(message: Message, stats_service: StatsService, settings: Settings) -> None:
+    if message.chat.type != "private" or not _is_owner(message, settings):
+        return
+
+    rows = await asyncio.to_thread(stats_service.get_premium_users, 20)
+    if not rows:
+        await message.reply("Premium userlar yo'q.")
+        return
+
+    lines = ["Premium userlar:"]
+    for row in rows:
+        username = f" @{row['username']}" if row.get("username") else ""
+        lines.append(
+            f"- {row['user_name']}{username}: {_format_dt(row['premium_until'])}"
+        )
+    await message.reply("\n".join(lines))
+
+
+@router.message(Command("check"))
+async def check_handler(message: Message, stats_service: StatsService, settings: Settings) -> None:
+    if message.chat.type != "private" or not _is_owner(message, settings):
+        return
+
+    user_id = None
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) > 1 and parts[1].strip().isdigit():
+        user_id = int(parts[1].strip())
+    elif message.reply_to_message and message.reply_to_message.from_user:
+        user_id = message.reply_to_message.from_user.id
+    elif message.from_user:
+        user_id = message.from_user.id
+
+    if not user_id:
+        await message.reply("User ID topilmadi.")
+        return
+
+    row = await asyncio.to_thread(stats_service.get_user_status, user_id)
+    if not row:
+        await message.reply(f"{user_id}: bazada topilmadi.")
+        return
+
+    username = f" @{row['username']}" if row.get("username") else ""
+    await message.reply(
+        f"{row['user_name']}{username}\n"
+        f"ID: {row['user_id']}\n"
+        f"Premium: {_format_dt(row['premium_until'])}"
+    )
 
 
 @router.message(Command("image"))

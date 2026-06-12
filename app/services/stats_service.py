@@ -74,6 +74,35 @@ class StatsService:
                     );
                     """
                 )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS users (
+                        user_id BIGINT PRIMARY KEY,
+                        user_name TEXT NOT NULL,
+                        username TEXT,
+                        premium_until TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS payments (
+                        id SERIAL PRIMARY KEY,
+                        user_id BIGINT NOT NULL,
+                        user_name TEXT NOT NULL,
+                        username TEXT,
+                        plan TEXT NOT NULL,
+                        stars INTEGER NOT NULL,
+                        currency TEXT NOT NULL DEFAULT 'XTR',
+                        payload TEXT NOT NULL,
+                        telegram_payment_charge_id TEXT,
+                        provider_payment_charge_id TEXT,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                    """
+                )
             conn.commit()
 
     def add_message_stat(self, chat_id: int, user_id: int, user_name: str) -> None:
@@ -102,6 +131,9 @@ class StatsService:
         if chat_type != "private" and self.main_group_id and chat_id == self.main_group_id:
             return True, 0, 0
 
+        if self.is_user_premium(user_id):
+            return True, 0, 0
+
         limit = 10 if chat_type == "private" else 9
         day = today_key()
 
@@ -121,6 +153,173 @@ class StatsService:
             conn.commit()
 
         return count <= limit, count, limit
+
+    def upsert_user(self, user_id: int, user_name: str, username: str | None = None) -> None:
+        if not self.enabled:
+            return
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO users (user_id, user_name, username)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id)
+                    DO UPDATE SET
+                        user_name = EXCLUDED.user_name,
+                        username = EXCLUDED.username,
+                        updated_at = NOW();
+                    """,
+                    (user_id, user_name, username),
+                )
+            conn.commit()
+
+    def record_payment(
+        self,
+        user_id: int,
+        user_name: str,
+        username: str | None,
+        plan: str,
+        stars: int,
+        payload: str,
+        telegram_payment_charge_id: str | None,
+        provider_payment_charge_id: str | None,
+        duration_days: int,
+    ) -> datetime | None:
+        if not self.enabled:
+            return None
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO users (user_id, user_name, username, premium_until)
+                    VALUES (%s, %s, %s, NOW() + (%s * INTERVAL '1 day'))
+                    ON CONFLICT (user_id)
+                    DO UPDATE SET
+                        user_name = EXCLUDED.user_name,
+                        username = EXCLUDED.username,
+                        premium_until = GREATEST(COALESCE(users.premium_until, NOW()), NOW())
+                            + (%s * INTERVAL '1 day'),
+                        updated_at = NOW()
+                    RETURNING premium_until;
+                    """,
+                    (user_id, user_name, username, duration_days, duration_days),
+                )
+                premium_until = cur.fetchone()["premium_until"]
+                cur.execute(
+                    """
+                    INSERT INTO payments (
+                        user_id,
+                        user_name,
+                        username,
+                        plan,
+                        stars,
+                        currency,
+                        payload,
+                        telegram_payment_charge_id,
+                        provider_payment_charge_id
+                    )
+                    VALUES (%s, %s, %s, %s, %s, 'XTR', %s, %s, %s);
+                    """,
+                    (
+                        user_id,
+                        user_name,
+                        username,
+                        plan,
+                        stars,
+                        payload,
+                        telegram_payment_charge_id,
+                        provider_payment_charge_id,
+                    ),
+                )
+            conn.commit()
+
+        return premium_until
+
+    def get_premium_until(self, user_id: int) -> datetime | None:
+        if not self.enabled:
+            return None
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT premium_until
+                    FROM users
+                    WHERE user_id = %s;
+                    """,
+                    (user_id,),
+                )
+                row = cur.fetchone()
+                return row["premium_until"] if row else None
+
+    def is_user_premium(self, user_id: int) -> bool:
+        premium_until = self.get_premium_until(user_id)
+        if not premium_until:
+            return False
+        return premium_until > datetime.now(TZ)
+
+    def get_income_summary(self) -> dict:
+        if not self.enabled:
+            return {"payments": 0, "stars": 0}
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS payments, COALESCE(SUM(stars), 0) AS stars FROM payments;")
+                return dict(cur.fetchone())
+
+    def get_recent_payments(self, limit: int = 10) -> list[dict]:
+        if not self.enabled:
+            return []
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT user_id, user_name, username, plan, stars, created_at
+                    FROM payments
+                    ORDER BY created_at DESC
+                    LIMIT %s;
+                    """,
+                    (limit,),
+                )
+                return list(cur.fetchall())
+
+    def get_premium_users(self, limit: int = 20) -> list[dict]:
+        if not self.enabled:
+            return []
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT user_id, user_name, username, premium_until
+                    FROM users
+                    WHERE premium_until IS NOT NULL
+                    ORDER BY premium_until DESC
+                    LIMIT %s;
+                    """,
+                    (limit,),
+                )
+                return list(cur.fetchall())
+
+    def get_user_status(self, user_id: int) -> dict | None:
+        if not self.enabled:
+            return None
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT user_id, user_name, username, premium_until
+                    FROM users
+                    WHERE user_id = %s;
+                    """,
+                    (user_id,),
+                )
+                row = cur.fetchone()
+                return dict(row) if row else None
 
     def update_memory(self, chat_id: int, user_id: int, summary: str) -> None:
         if not self.enabled or not summary.strip():

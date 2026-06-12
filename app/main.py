@@ -31,6 +31,7 @@ async def main() -> None:
     dp["ai_provider"] = build_ai_provider(settings)
     dp["codmunity_client"] = CodmunityClient(timeout=settings.codmunity_timeout)
     dp["stats_service"] = stats_service
+    dp["settings"] = settings
     dp.message.middleware(StatsMiddleware(stats_service))
     dp.include_router(common.router)
 
