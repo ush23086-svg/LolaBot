@@ -29,6 +29,7 @@ from app.services.meta_engine import (
     format_weapon_loadout,
     is_loadout_request,
     is_meta_request,
+    normalize_text,
     requested_game,
 )
 from app.services.stats_service import StatsService, format_stats, today_key
@@ -255,6 +256,23 @@ def _format_dt(value) -> str:
     if not value:
         return "yo'q"
     return value.astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def _is_direct_meta_scope(text: str, game_choice: str | None) -> bool:
+    if not game_choice:
+        return False
+
+    query = normalize_text(text)
+    return query in {
+        "ranked",
+        "rank",
+        "warzone",
+        "mw3",
+        "resurgence",
+        "rezurgence",
+        "br",
+        "battleroyale",
+    }
 
 
 def _memory_summary(user_text: str, answer: str) -> str:
@@ -662,6 +680,11 @@ async def text_handler(
     if selected_weapon:
         await _handle_selected_weapon(message, selected_weapon, codmunity_client)
         await _save_memory(message, stats_service, text, "Loadout ochildi.")
+        return
+
+    if _is_direct_meta_scope(text, game_choice):
+        await _handle_meta_request(message, text, chat_data, codmunity_client)
+        await _save_memory(message, stats_service, text, "Meta turi so'raldi.")
         return
 
     if is_meta_request(text):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -16,6 +17,8 @@ OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 AI_ERROR_MESSAGE = "Hozir javob berishda muammo bo'ldi. Keyinroq urinib ko'ring."
 IMAGE_ERROR_MESSAGE = "Rasmni ko'rish modeli ulanmagan. OPENROUTER_VISION_MODEL_1 qo'shing."
 IMAGE_GENERATION_ERROR_MESSAGE = "Rasm yaratishda muammo bo'ldi. Keyinroq urinib ko'ring."
+KEY_COOLDOWN_SECONDS = 10 * 60
+TIMEOUT_COOLDOWN_SECONDS = 2 * 60
 
 SYSTEM_PROMPT = """
 Sen Lola ismli Telegram botisan.
@@ -111,6 +114,7 @@ class OpenRouterProvider(AIProvider):
         self.vision_models = vision_models
         self.image_models = image_models
         self.app_name = app_name
+        self._key_cooldowns: dict[int, float] = {}
 
     async def ask_ai(self, text: str, user_name: str, reply_context: str = "") -> str:
         user_content = f"Foydalanuvchi: {user_name}\n"
@@ -242,9 +246,23 @@ class OpenRouterProvider(AIProvider):
         operation: str,
         validator: Callable[[Any], bool] | None = None,
     ) -> Any | None:
+        attempted = 0
+        skipped = 0
         for model_index, model in enumerate(models, start=1):
             model_payload = {**payload, "model": model}
             for key_index, api_key in enumerate(self.api_keys, start=1):
+                if self._is_key_on_cooldown(key_index):
+                    skipped += 1
+                    logger.info(
+                        "OpenRouter operation=%s model=%s model_index=%s KEY_%s skipped by temporary cooldown",
+                        operation,
+                        model,
+                        model_index,
+                        key_index,
+                    )
+                    continue
+
+                attempted += 1
                 headers = {
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
@@ -252,14 +270,14 @@ class OpenRouterProvider(AIProvider):
                 }
 
                 try:
-                    timeout = aiohttp.ClientTimeout(total=60)
+                    timeout = aiohttp.ClientTimeout(total=35)
                     async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
                         async with session.post(OPENROUTER_CHAT_URL, json=model_payload) as response:
                             data = await _response_data(response)
                             if response.status >= 400:
                                 rate_headers = _rate_limit_headers(response)
                                 logger.warning(
-                                    "OpenRouter operation=%s model=%s model_index=%s key_index=%s status=%s rate=%s error=%s",
+                                    "OpenRouter operation=%s model=%s model_index=%s KEY_%s status=%s rate=%s error=%s",
                                     operation,
                                     model,
                                     model_index,
@@ -269,7 +287,9 @@ class OpenRouterProvider(AIProvider):
                                     data,
                                 )
                                 reason = _rotation_reason(response.status, data, rate_headers)
-                                if not _should_try_next_combination(response.status, data):
+                                if _should_skip_key(response.status, data, rate_headers):
+                                    self._cooldown_key(key_index, reason)
+                                if not _should_try_next_combination(response.status, data, rate_headers):
                                     reason = f"non-retryable {reason}"
                                 _log_next_rotation(
                                     model=model,
@@ -282,7 +302,7 @@ class OpenRouterProvider(AIProvider):
                                 continue
                 except aiohttp.ClientError as exc:
                     logger.exception(
-                        "OpenRouter operation=%s model=%s model_index=%s key_index=%s request failed: %s",
+                        "OpenRouter operation=%s model=%s model_index=%s KEY_%s request failed: %s",
                         operation,
                         model,
                         model_index,
@@ -290,9 +310,29 @@ class OpenRouterProvider(AIProvider):
                         exc,
                     )
                     continue
+                except TimeoutError as exc:
+                    reason = "timeout"
+                    self._cooldown_key(key_index, reason, seconds=TIMEOUT_COOLDOWN_SECONDS)
+                    logger.warning(
+                        "OpenRouter operation=%s model=%s model_index=%s KEY_%s timeout: %s",
+                        operation,
+                        model,
+                        model_index,
+                        key_index,
+                        exc,
+                    )
+                    _log_next_rotation(
+                        model=model,
+                        model_index=model_index,
+                        models=models,
+                        key_index=key_index,
+                        keys_count=len(self.api_keys),
+                        reason=reason,
+                    )
+                    continue
                 except Exception as exc:
                     logger.exception(
-                        "OpenRouter operation=%s model=%s model_index=%s key_index=%s unexpected failure: %s",
+                        "OpenRouter operation=%s model=%s model_index=%s KEY_%s unexpected failure: %s",
                         operation,
                         model,
                         model_index,
@@ -322,8 +362,32 @@ class OpenRouterProvider(AIProvider):
 
                 return data
 
-        logger.error("OpenRouter operation=%s failed for all keys and models: %s", operation, models)
+        logger.error(
+            "OpenRouter operation=%s failed for all available keys and models: models=%s attempted=%s cooldown_skipped=%s",
+            operation,
+            models,
+            attempted,
+            skipped,
+        )
         return None
+
+    def _is_key_on_cooldown(self, key_index: int) -> bool:
+        until = self._key_cooldowns.get(key_index)
+        if not until:
+            return False
+        if until <= time.monotonic():
+            self._key_cooldowns.pop(key_index, None)
+            return False
+        return True
+
+    def _cooldown_key(self, key_index: int, reason: str, seconds: int = KEY_COOLDOWN_SECONDS) -> None:
+        self._key_cooldowns[key_index] = time.monotonic() + seconds
+        logger.warning(
+            "OpenRouter KEY_%s temporarily skipped for %ss because of %s",
+            key_index,
+            seconds,
+            reason,
+        )
 
 
 def build_ai_provider(settings: Settings) -> AIProvider:
@@ -341,9 +405,15 @@ def build_ai_provider(settings: Settings) -> AIProvider:
     return NullAIProvider()
 
 
-def _should_try_next_combination(status: int, data: Any) -> bool:
+def _should_try_next_combination(
+    status: int,
+    data: Any,
+    rate_headers: dict[str, str] | None = None,
+) -> bool:
     text = str(data).lower()
     if status in {401, 402, 403, 404, 429}:
+        return True
+    if rate_headers and rate_headers.get("X-RateLimit-Remaining") == "0":
         return True
     return any(
         phrase in text
@@ -361,6 +431,29 @@ def _should_try_next_combination(status: int, data: Any) -> bool:
             "temporarily unavailable",
             "free-models-per-day",
             "no endpoints found",
+        )
+    )
+
+
+def _should_skip_key(status: int, data: Any, rate_headers: dict[str, str]) -> bool:
+    text = str(data).lower()
+    if status in {401, 402, 403, 429}:
+        return True
+    if rate_headers.get("X-RateLimit-Remaining") == "0":
+        return True
+    return any(
+        phrase in text
+        for phrase in (
+            "quota",
+            "rate limit",
+            "ratelimit",
+            "insufficient credits",
+            "insufficient credit",
+            "no credits",
+            "credit balance",
+            "temporarily rate-limited",
+            "temporarily rate limited",
+            "free-models-per-day",
         )
     )
 
