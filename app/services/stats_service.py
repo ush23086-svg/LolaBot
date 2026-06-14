@@ -128,7 +128,7 @@ class StatsService:
         if not self.enabled:
             return True, 0, 0
 
-        if chat_type != "private" and self.main_group_id and chat_id == self.main_group_id:
+        if chat_type != "private" and self.main_group_id is not None and int(chat_id) == int(self.main_group_id):
             return True, 0, 0
 
         if self.is_user_premium(user_id):
@@ -136,6 +136,7 @@ class StatsService:
 
         limit = 10 if chat_type == "private" else 9
         day = today_key()
+        quota_chat_id = 0 if chat_type == "private" else chat_id
 
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -147,7 +148,7 @@ class StatsService:
                     DO UPDATE SET count = bot_usage_limits.count + 1
                     RETURNING count;
                     """,
-                    (chat_id, user_id, day),
+                    (quota_chat_id, user_id, day),
                 )
                 count = int(cur.fetchone()["count"])
             conn.commit()
@@ -236,6 +237,61 @@ class StatsService:
             conn.commit()
 
         return premium_until
+
+    def grant_premium(
+        self,
+        user_id: int,
+        days: int,
+        user_name: str | None = None,
+        username: str | None = None,
+    ) -> datetime | None:
+        if not self.enabled:
+            return None
+
+        safe_name = user_name or str(user_id)
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO users (user_id, user_name, username, premium_until)
+                    VALUES (%s, %s, %s, NOW() + (%s * INTERVAL '1 day'))
+                    ON CONFLICT (user_id)
+                    DO UPDATE SET
+                        user_name = COALESCE(EXCLUDED.user_name, users.user_name),
+                        username = COALESCE(EXCLUDED.username, users.username),
+                        premium_until = GREATEST(COALESCE(users.premium_until, NOW()), NOW())
+                            + (%s * INTERVAL '1 day'),
+                        updated_at = NOW()
+                    RETURNING premium_until;
+                    """,
+                    (user_id, safe_name, username, days, days),
+                )
+                premium_until = cur.fetchone()["premium_until"]
+            conn.commit()
+
+        return premium_until
+
+    def revoke_premium(self, user_id: int, user_name: str | None = None, username: str | None = None) -> None:
+        if not self.enabled:
+            return
+
+        safe_name = user_name or str(user_id)
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO users (user_id, user_name, username, premium_until)
+                    VALUES (%s, %s, %s, NULL)
+                    ON CONFLICT (user_id)
+                    DO UPDATE SET
+                        user_name = COALESCE(EXCLUDED.user_name, users.user_name),
+                        username = COALESCE(EXCLUDED.username, users.username),
+                        premium_until = NULL,
+                        updated_at = NOW();
+                    """,
+                    (user_id, safe_name, username),
+                )
+            conn.commit()
 
     def get_premium_until(self, user_id: int) -> datetime | None:
         if not self.enabled:

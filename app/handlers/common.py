@@ -258,6 +258,29 @@ def _format_dt(value) -> str:
     return value.astimezone().strftime("%Y-%m-%d %H:%M")
 
 
+def _target_user_from_admin_command(message: Message) -> tuple[int | None, str | None, str | None]:
+    parts = (message.text or "").split()
+    if message.reply_to_message and message.reply_to_message.from_user:
+        user = message.reply_to_message.from_user
+        return user.id, user.full_name or user.username or str(user.id), user.username
+
+    if len(parts) > 1 and parts[1].lstrip("-").isdigit():
+        return int(parts[1]), None, None
+
+    return None, None, None
+
+
+def _days_from_admin_command(message: Message, default: int = 30) -> int:
+    parts = (message.text or "").split()
+    if message.reply_to_message and len(parts) > 1 and parts[1].isdigit():
+        return max(1, int(parts[1]))
+
+    for part in parts[2:]:
+        if part.isdigit():
+            return max(1, int(part))
+    return default
+
+
 def _is_direct_meta_scope(text: str, game_choice: str | None) -> bool:
     if not game_choice:
         return False
@@ -511,6 +534,45 @@ async def users_handler(message: Message, stats_service: StatsService, settings:
             f"- {row['user_name']}{username}: {_format_dt(row['premium_until'])}"
         )
     await message.reply("\n".join(lines))
+
+
+@router.message(Command("grant"))
+async def grant_handler(message: Message, stats_service: StatsService, settings: Settings) -> None:
+    if message.chat.type != "private" or not _is_owner(message, settings):
+        return
+
+    user_id, user_name, username = _target_user_from_admin_command(message)
+    if not user_id:
+        await message.reply("User ID yozing yoki user xabariga reply qiling: /grant 123456789 30")
+        return
+
+    days = _days_from_admin_command(message, default=30)
+    premium_until = await asyncio.to_thread(
+        stats_service.grant_premium,
+        user_id,
+        days,
+        user_name,
+        username,
+    )
+    if premium_until is None:
+        await message.reply("DATABASE_URL ulanmagan.")
+        return
+
+    await message.reply(f"Premium berildi: {user_id}\nMuddat: {_format_dt(premium_until)}")
+
+
+@router.message(Command("revoke"))
+async def revoke_handler(message: Message, stats_service: StatsService, settings: Settings) -> None:
+    if message.chat.type != "private" or not _is_owner(message, settings):
+        return
+
+    user_id, user_name, username = _target_user_from_admin_command(message)
+    if not user_id:
+        await message.reply("User ID yozing yoki user xabariga reply qiling: /revoke 123456789")
+        return
+
+    await asyncio.to_thread(stats_service.revoke_premium, user_id, user_name, username)
+    await message.reply(f"Premium o'chirildi: {user_id}")
 
 
 @router.message(Command("check"))

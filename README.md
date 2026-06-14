@@ -89,6 +89,8 @@ Admin komandalar faqat `OWNER_ID` uchun private chatda ishlaydi:
 /income
 /users
 /check <user_id>
+/grant <user_id> [days]
+/revoke <user_id>
 ```
 
 ## Local ishga tushirish
