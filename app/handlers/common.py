@@ -3,6 +3,7 @@ import base64
 import logging
 import random
 import re
+import time
 from datetime import timedelta
 
 from aiogram import Bot, F, Router
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TEXT_LIMIT = 4096
 CHAT_DATA: dict[int, dict] = {}
+META_CONTEXT_TTL_SECONDS = 15 * 60
 
 VIDEO_FILENAME = "SaveVid_Net_AQNKnUIQh4au0ukBFQeeBEE9GNtzkOFvNFXUDTipfHHr9qwI5m8RUCHhFxyUIY.mp4"
 VIDEO_SONG2_FILENAME = "video_2026-05-31_21-36-53.mp4"
@@ -72,6 +74,15 @@ MEMORY_RE = re.compile(
     r"(kecha|oldin|avval).*(nima|gaplash|yozish)|nimani gaplashdik",
     re.IGNORECASE,
 )
+META_LIST_LINE_RE = re.compile(r"^\s*(\d{1,2})\.\s+(.+?)(?:\s+-\s+(.+?))?(?:\s+-\s+(\d+(?:\.\d+)?%))?\s*$")
+META_SELECTION_WORDS = {
+    "birinchi": 1,
+    "ikkinchi": 2,
+    "uchinchi": 3,
+    "tortinchi": 4,
+    "to'rtinchi": 4,
+    "beshinchi": 5,
+}
 
 
 def _user_label(message: Message) -> str:
@@ -113,6 +124,110 @@ def _chunks(text: str, limit: int = TELEGRAM_TEXT_LIMIT) -> list[str]:
 
 def _chat_data(message: Message) -> dict:
     return CHAT_DATA.setdefault(message.chat.id, {})
+
+
+def _user_meta_key(message: Message) -> tuple[int, int]:
+    user_id = message.from_user.id if message.from_user else 0
+    return (message.chat.id, user_id)
+
+
+def _meta_contexts(message: Message) -> dict:
+    data = _chat_data(message)
+    return data.setdefault("meta_contexts", {})
+
+
+def _meta_context(message: Message) -> dict | None:
+    context = _meta_contexts(message).get(_user_meta_key(message))
+    if not context:
+        return None
+
+    if context.get("expires_at", 0) < time.monotonic():
+        _meta_contexts(message).pop(_user_meta_key(message), None)
+        return None
+
+    return context
+
+
+def _save_meta_context(message: Message, game: str, weapons: list[MetaWeapon]) -> None:
+    if not message.from_user:
+        return
+
+    source = weapons[0].source if weapons else ""
+    _meta_contexts(message)[_user_meta_key(message)] = {
+        "mode": game,
+        "source": source,
+        "weapons": [weapon.to_dict() for weapon in weapons],
+        "expires_at": time.monotonic() + META_CONTEXT_TTL_SECONDS,
+    }
+
+
+def _meta_weapons_from_context(message: Message) -> list[dict]:
+    context = _meta_context(message)
+    if not context:
+        return []
+    return list(context.get("weapons", []))
+
+
+def _reply_meta_weapons(message: Message) -> list[dict]:
+    reply = message.reply_to_message
+    if not reply:
+        return []
+
+    text = reply.text or reply.caption or ""
+    if "Hozirgi meta:" not in text:
+        return []
+
+    source = "CODMunity"
+    weapons: list[dict] = []
+    for line in text.splitlines():
+        clean_line = line.strip()
+        if clean_line.startswith("Manba:"):
+            source = clean_line.partition(":")[2].strip() or source
+            continue
+
+        match = META_LIST_LINE_RE.match(clean_line)
+        if not match:
+            continue
+
+        _, name, role, pick = match.groups()
+        weapon = MetaWeapon(
+            name=name.strip(),
+            type=(role or "Meta").strip(),
+            pick=(pick or "").strip(),
+            url=_inferred_loadout_url(name, source),
+            source=source,
+        )
+        weapons.append(weapon.to_dict())
+
+    return weapons
+
+
+def _inferred_loadout_url(name: str, source: str) -> str | None:
+    if source != "WZStatsGG":
+        return None
+
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return f"https://wzstats.gg/best-loadouts/{slug}" if slug else None
+
+
+def _selection_index_from_text(text: str) -> int | None:
+    query = normalize_text(text)
+    for word, number in META_SELECTION_WORDS.items():
+        if normalize_text(word) in query:
+            return number - 1
+
+    match = re.match(r"^(\d{1,2})(.*)$", query)
+    if match:
+        suffix = match.group(2)
+        if suffix in {"", "ni", "niber", "ber", "chi", "chisi", "nchi", "inchi", "och", "ochibber", "taxlabber"}:
+            return int(match.group(1)) - 1
+
+    return None
+
+
+def _selection_is_out_of_range(text: str, weapons: list[dict]) -> bool:
+    index = _selection_index_from_text(text)
+    return index is not None and not (0 <= index < len(weapons))
 
 
 def _reply_context(message: Message) -> str:
@@ -714,7 +829,7 @@ async def text_handler(
         return
 
     chat_data = _chat_data(message)
-    last_meta = chat_data.get("last_meta_weapons", [])
+    last_meta = _meta_weapons_from_context(message) or _reply_meta_weapons(message)
     selected_weapon = find_selected_weapon(text, last_meta)
     game_choice = requested_game(text)
 
@@ -742,6 +857,10 @@ async def text_handler(
     if selected_weapon:
         await _handle_selected_weapon(message, selected_weapon, codmunity_client)
         await _save_memory(message, stats_service, text, "Loadout ochildi.")
+        return
+
+    if last_meta and _selection_is_out_of_range(text, last_meta):
+        await message.reply("Ro'yxatda bunaqa raqam yo'q")
         return
 
     if _is_direct_meta_scope(text, game_choice):
@@ -807,7 +926,7 @@ async def _handle_meta_request(
             weapons = codmunity_client.get_battle_royale_meta()
         else:
             weapons = codmunity_client.get_warzone_meta()
-        chat_data["last_meta_weapons"] = [weapon.to_dict() for weapon in weapons]
+        _save_meta_context(message, game, weapons)
         await status.edit_text(format_meta_list(weapons))
     except MetaEngineError as exc:
         await status.edit_text(str(exc))
@@ -841,6 +960,10 @@ async def _handle_selected_weapon(
     selected_weapon: MetaWeapon,
     codmunity_client: CodmunityClient,
 ) -> None:
+    if not selected_weapon.url and (selected_weapon.code or selected_weapon.attachments):
+        await message.reply(format_weapon_loadout(selected_weapon))
+        return
+
     status = await message.reply("CODMunity'dan loadoutni ochyapman...")
 
     try:
