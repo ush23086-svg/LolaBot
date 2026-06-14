@@ -20,6 +20,8 @@ from app.services.meta_engine import (
     MetaWeapon,
     check_loadout_answer,
     find_selected_weapon,
+    format_meta_list,
+    format_source_loadout,
     requested_game,
 )
 
@@ -39,8 +41,8 @@ class MetaSelectionTest(unittest.TestCase):
     def setUp(self):
         CHAT_DATA.clear()
         self.weapons = [
-            MetaWeapon("Maddox RFB", "Long Range", "", url="https://wzstats.gg/best-loadouts/maddox-rfb", source="WZStatsGG"),
-            MetaWeapon("Carbon 57", "Close Range", "", url="https://wzstats.gg/best-loadouts/carbon-57", source="WZStatsGG"),
+            MetaWeapon("Maddox RFB", "Long Range", "", url="https://wzstats.gg/best-loadouts/maddox-rfb", game="br_ranked", source="WZStatsGG"),
+            MetaWeapon("Carbon 57", "Close Range", "", url="https://wzstats.gg/best-loadouts/carbon-57", game="br_ranked", source="WZStatsGG"),
         ]
         self.weapon_dicts = [weapon.to_dict() for weapon in self.weapons]
 
@@ -65,6 +67,7 @@ class MetaSelectionTest(unittest.TestCase):
     def test_reply_meta_list_parser(self):
         text = (
             "Manba: WZStatsGG\n"
+            "Mode: BR Ranked\n"
             "Hozirgi meta:\n"
             "1. Maddox RFB - Long Range\n"
             "2. Carbon 57 - Close Range\n"
@@ -72,6 +75,25 @@ class MetaSelectionTest(unittest.TestCase):
         parsed = _reply_meta_weapons(fake_message(reply_text=text))
         self.assertEqual(parsed[1]["name"], "Carbon 57")
         self.assertEqual(parsed[1]["url"], "https://wzstats.gg/best-loadouts/carbon-57")
+        self.assertEqual(parsed[1]["source_json"]["mode"], "BR Ranked")
+
+    def test_meta_list_includes_mode(self):
+        text = format_meta_list(self.weapons)
+        self.assertIn("Manba: WZStatsGG", text)
+        self.assertIn("Mode: BR Ranked", text)
+        self.assertIn("2. Carbon 57 - Close Range", text)
+
+    def test_loadout_includes_mode(self):
+        source_json = {
+            "source": "WZStatsGG",
+            "mode": "Resurgence Ranked",
+            "weapon": "AK-27",
+            "role": "Long Range",
+            "code": "S05-9CQNY-PB31",
+            "attachments": [],
+        }
+        text = format_source_loadout(source_json)
+        self.assertTrue(text.startswith("Manba: WZStatsGG\nMode: Resurgence Ranked\nAK-27 - Long Range"))
 
     def test_meta_context_is_user_scoped_and_expires(self):
         first_user = fake_message(chat_id=100, user_id=1)
@@ -98,6 +120,7 @@ class MetaSelectionTest(unittest.TestCase):
         }
         answer = (
             "Manba: WZStatsGG\n"
+            "Mode: BR Ranked\n"
             "Carbon 57 - Close Range\n"
             "Code: S05-9CQNY-PB31\n\n"
             "Attachments:\n"
@@ -117,7 +140,10 @@ class MetaSelectionTest(unittest.TestCase):
             "code": None,
             "attachments": [],
         }
-        ok, reason = check_loadout_answer(source_json, "Manba: WZStatsGG\nCarbon 57 - Close Range\n\nAttachments:\n- Fake Barrel")
+        ok, reason = check_loadout_answer(
+            source_json,
+            "Manba: WZStatsGG\nMode: BR Ranked\nCarbon 57 - Close Range\n\nAttachments:\n- Fake Barrel",
+        )
         self.assertFalse(ok)
         self.assertEqual(reason, "unexpected attachments")
 
@@ -130,7 +156,7 @@ class MetaSelectionTest(unittest.TestCase):
             "code": "S05-9CQNY-PB31",
             "attachments": [],
         }
-        ok, reason = check_loadout_answer(source_json, "Manba: WZStatsGG\nCarbon 57 - Close Range\nCode: WRONG")
+        ok, reason = check_loadout_answer(source_json, "Manba: WZStatsGG\nMode: BR Ranked\nCarbon 57 - Close Range\nCode: WRONG")
         self.assertFalse(ok)
         self.assertEqual(reason, "code mismatch")
 

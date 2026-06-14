@@ -32,6 +32,7 @@ from app.services.meta_engine import (
     format_weapon_loadout,
     is_loadout_request,
     is_meta_request,
+    meta_mode_label,
     normalize_text,
     requested_game,
 )
@@ -206,11 +207,15 @@ def _reply_meta_weapons(message: Message) -> list[dict]:
         return []
 
     source = "CODMunity"
+    mode = "Warzone"
     weapons: list[dict] = []
     for line in text.splitlines():
         clean_line = line.strip()
         if clean_line.startswith("Manba:"):
             source = clean_line.partition(":")[2].strip() or source
+            continue
+        if clean_line.startswith("Mode:"):
+            mode = clean_line.partition(":")[2].strip() or mode
             continue
 
         match = META_LIST_LINE_RE.match(clean_line)
@@ -223,9 +228,12 @@ def _reply_meta_weapons(message: Message) -> list[dict]:
             type=(role or "Meta").strip(),
             pick=(pick or "").strip(),
             url=_inferred_loadout_url(name, source),
+            game=mode,
             source=source,
         )
-        weapons.append(weapon.to_dict())
+        item = weapon.to_dict()
+        item["source_json"] = weapon.to_source_json(mode=mode)
+        weapons.append(item)
 
     return weapons
 
@@ -239,14 +247,7 @@ def _inferred_loadout_url(name: str, source: str) -> str | None:
 
 
 def _mode_label(game: str) -> str:
-    return {
-        "br_ranked": "BR Ranked",
-        "resurgence_ranked": "Resurgence Ranked",
-        "resurgence": "Resurgence",
-        "battle_royale": "Battle Royale",
-        "mw3": "MW3",
-        "warzone": "Warzone",
-    }.get(game, game)
+    return meta_mode_label(game)
 
 
 def _selection_index_from_text(text: str) -> int | None:

@@ -96,6 +96,17 @@ class Attachment:
     name: str
 
 
+def meta_mode_label(game: str | None) -> str:
+    return {
+        "br_ranked": "BR Ranked",
+        "resurgence_ranked": "Resurgence Ranked",
+        "resurgence": "Resurgence",
+        "battle_royale": "Battle Royale",
+        "mw3": "MW3",
+        "warzone": "Warzone",
+    }.get(game or "", game or "Warzone")
+
+
 @dataclass
 class MetaWeapon:
     name: str
@@ -125,7 +136,7 @@ class MetaWeapon:
     def to_source_json(self, mode: str | None = None) -> dict:
         return {
             "source": self.source,
-            "mode": mode or self.game,
+            "mode": meta_mode_label(mode or self.game),
             "weapon": self.name,
             "role": self.type,
             "code": self.code,
@@ -362,7 +373,8 @@ def normalize_text(value: str) -> str:
 
 def format_meta_list(weapons: list[MetaWeapon]) -> str:
     source = weapons[0].source if weapons else "CODMunity"
-    lines = [f"Manba: {source}", "Hozirgi meta:"]
+    mode = meta_mode_label(weapons[0].game if weapons else "warzone")
+    lines = [f"Manba: {source}", f"Mode: {mode}", "Hozirgi meta:"]
     for index, weapon in enumerate(weapons, start=1):
         pick = f" - {weapon.pick}" if weapon.pick else ""
         lines.append(f"{index}. {weapon.name} - {weapon.type}{pick}")
@@ -383,7 +395,11 @@ def format_weapon_loadout(weapon: MetaWeapon) -> str:
 
 
 def format_source_loadout(source_json: dict) -> str:
-    lines = [f"Manba: {source_json.get('source', '')}", f"{source_json.get('weapon', '')} - {source_json.get('role') or 'Loadout'}"]
+    lines = [
+        f"Manba: {source_json.get('source', '')}",
+        f"Mode: {meta_mode_label(source_json.get('mode'))}",
+        f"{source_json.get('weapon', '')} - {source_json.get('role') or 'Loadout'}",
+    ]
     code = source_json.get("code")
     attachments = source_json.get("attachments") or []
 
@@ -406,6 +422,9 @@ def check_loadout_answer(source_json: dict, answer: str) -> tuple[bool, str]:
 
     if source and f"Manba: {source}" not in answer:
         return False, "source mismatch"
+    mode = str(source_json.get("mode") or "").strip()
+    if mode and f"Mode: {meta_mode_label(mode)}" not in answer:
+        return False, "mode mismatch"
     if weapon and normalize_text(weapon) not in normalize_text(answer):
         return False, "weapon mismatch"
     answer_codes = _answer_codes(answer)
