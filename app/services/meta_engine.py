@@ -21,6 +21,7 @@ WZSTATS_RESURGENCE_META_URL = f"{WZSTATS_BASE_URL}/warzone/meta/resurgence"
 WZSTATS_RESURGENCE_RANKED_META_URL = f"{WZSTATS_BASE_URL}/warzone/meta/ranked/resurgence"
 META_NOT_FOUND_MESSAGE = "Meta manbalaridan aniq ma'lumot topilmadi, keyinroq qayta urinib ko'ring."
 LOADOUT_NOT_FOUND_MESSAGE = "Aniq ma'lumot topolmadim."
+CHECKER_FAIL_MESSAGE = "Manbadan aniq loadout topilmadi, uydirma build bermayman."
 
 CODE_RE = re.compile(r"^[A-Z]\d{2}-[A-Z0-9]+(?:-[A-Z0-9]+){1,3}$")
 PICK_RE = re.compile(r"^\d+(?:\.\d+)?%\s*Pick$", re.IGNORECASE)
@@ -118,6 +119,17 @@ class MetaWeapon:
             "game": self.game,
             "source": self.source,
             "attachments": [attachment.__dict__ for attachment in self.attachments],
+            "source_json": self.to_source_json(),
+        }
+
+    def to_source_json(self, mode: str | None = None) -> dict:
+        return {
+            "source": self.source,
+            "mode": mode or self.game,
+            "weapon": self.name,
+            "role": self.type,
+            "code": self.code,
+            "attachments": [attachment.name for attachment in self.attachments],
         }
 
     @classmethod
@@ -359,18 +371,85 @@ def format_meta_list(weapons: list[MetaWeapon]) -> str:
 
 
 def format_weapon_loadout(weapon: MetaWeapon) -> str:
-    lines = [f"Manba: {weapon.source}", f"{weapon.name} - {weapon.type}"]
-    if weapon.pick:
-        lines.append(f"Pick rate: {weapon.pick}")
-    if weapon.code:
-        lines.append(f"Code: {weapon.code}")
-    if weapon.attachments:
+    source_json = weapon.to_source_json()
+    text = format_source_loadout(source_json)
+    ok, reason = check_loadout_answer(source_json, text)
+    if not ok:
+        logger.warning("loadout checker failed reason=%s weapon=%s source=%s", reason, weapon.name, weapon.source)
+        raise MetaEngineError(CHECKER_FAIL_MESSAGE)
+
+    logger.info("loadout checker passed weapon=%s source=%s", weapon.name, weapon.source)
+    return text
+
+
+def format_source_loadout(source_json: dict) -> str:
+    lines = [f"Manba: {source_json.get('source', '')}", f"{source_json.get('weapon', '')} - {source_json.get('role') or 'Loadout'}"]
+    code = source_json.get("code")
+    attachments = source_json.get("attachments") or []
+
+    if code:
+        lines.append(f"Code: {code}")
+    if attachments:
         lines.append("\nAttachments:")
-        for attachment in weapon.attachments:
-            lines.append(f"- {attachment.slot}: {attachment.name}")
-    if not weapon.code and not weapon.attachments:
-        raise MetaEngineError("CODMunity'dan ma'lumot olishda muammo bo'ldi")
+        for attachment in attachments:
+            lines.append(f"- {attachment}")
+    if not code and not attachments:
+        raise MetaEngineError(CHECKER_FAIL_MESSAGE)
     return "\n".join(lines)
+
+
+def check_loadout_answer(source_json: dict, answer: str) -> tuple[bool, str]:
+    source = str(source_json.get("source") or "").strip()
+    weapon = str(source_json.get("weapon") or "").strip()
+    code = source_json.get("code")
+    attachments = [str(item).strip() for item in source_json.get("attachments") or [] if str(item).strip()]
+
+    if source and f"Manba: {source}" not in answer:
+        return False, "source mismatch"
+    if weapon and normalize_text(weapon) not in normalize_text(answer):
+        return False, "weapon mismatch"
+    answer_codes = _answer_codes(answer)
+    if code and answer_codes != [str(code)]:
+        return False, "code mismatch"
+    if not code and answer_codes:
+        return False, "unexpected code"
+
+    answer_attachments = _answer_attachment_names(answer)
+    if not attachments and answer_attachments:
+        return False, "unexpected attachments"
+
+    allowed = {normalize_text(item) for item in attachments}
+    for attachment in answer_attachments:
+        if normalize_text(attachment) not in allowed:
+            return False, f"unknown attachment: {attachment}"
+
+    return True, "ok"
+
+
+def _answer_attachment_names(answer: str) -> list[str]:
+    names: list[str] = []
+    for line in answer.splitlines():
+        clean = line.strip()
+        if not clean.startswith("- "):
+            continue
+        value = clean[2:].strip()
+        if ":" in value:
+            value = value.split(":", 1)[1].strip()
+        if value:
+            names.append(value)
+    return names
+
+
+def _answer_codes(answer: str) -> list[str]:
+    codes: list[str] = []
+    for line in answer.splitlines():
+        clean = line.strip()
+        if not clean.lower().startswith("code:"):
+            continue
+        value = clean.split(":", 1)[1].strip()
+        if value:
+            codes.append(value)
+    return codes
 
 
 def is_meta_request(text: str) -> bool:

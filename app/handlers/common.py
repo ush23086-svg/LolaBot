@@ -22,7 +22,9 @@ from aiogram.types import (
 from app.config import Settings
 from app.services.ai_provider import AIProvider
 from app.services.meta_engine import (
+    CHECKER_FAIL_MESSAGE,
     CodmunityClient,
+    LOADOUT_NOT_FOUND_MESSAGE,
     MetaEngineError,
     MetaWeapon,
     find_selected_weapon,
@@ -83,6 +85,25 @@ META_SELECTION_WORDS = {
     "to'rtinchi": 4,
     "beshinchi": 5,
 }
+META_EXPLANATION_MARKERS = (
+    "nimafarqibor",
+    "farqinima",
+    "qandayfarq",
+    "tushuntir",
+    "qaysibirinima",
+    "nima",
+)
+META_ACTION_MARKERS = (
+    "meta",
+    "loadout",
+    "qurol",
+    "weapon",
+    "gun",
+    "build",
+    "klass",
+    "class",
+    "ber",
+)
 
 
 def _user_label(message: Message) -> str:
@@ -153,10 +174,17 @@ def _save_meta_context(message: Message, game: str, weapons: list[MetaWeapon]) -
         return
 
     source = weapons[0].source if weapons else ""
+    mode = _mode_label(game)
+    weapon_dicts = []
+    for weapon in weapons:
+        item = weapon.to_dict()
+        item["source_json"] = weapon.to_source_json(mode=mode)
+        weapon_dicts.append(item)
+
     _meta_contexts(message)[_user_meta_key(message)] = {
-        "mode": game,
+        "mode": mode,
         "source": source,
-        "weapons": [weapon.to_dict() for weapon in weapons],
+        "weapons": weapon_dicts,
         "expires_at": time.monotonic() + META_CONTEXT_TTL_SECONDS,
     }
 
@@ -208,6 +236,17 @@ def _inferred_loadout_url(name: str, source: str) -> str | None:
 
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     return f"https://wzstats.gg/best-loadouts/{slug}" if slug else None
+
+
+def _mode_label(game: str) -> str:
+    return {
+        "br_ranked": "BR Ranked",
+        "resurgence_ranked": "Resurgence Ranked",
+        "resurgence": "Resurgence",
+        "battle_royale": "Battle Royale",
+        "mw3": "MW3",
+        "warzone": "Warzone",
+    }.get(game, game)
 
 
 def _selection_index_from_text(text: str) -> int | None:
@@ -411,6 +450,37 @@ def _is_direct_meta_scope(text: str, game_choice: str | None) -> bool:
         "br",
         "battleroyale",
     }
+
+
+def _is_meta_explanation_question(text: str) -> bool:
+    query = normalize_text(text)
+    if not ("ranked" in query or "resurgence" in query or "brranked" in query):
+        return False
+    return any(marker in query for marker in META_EXPLANATION_MARKERS)
+
+
+def _is_meta_weapon_request(text: str, game_choice: str | None) -> bool:
+    if not game_choice or _is_meta_explanation_question(text):
+        return False
+    query = normalize_text(text)
+    return any(marker in query for marker in META_ACTION_MARKERS)
+
+
+def _should_handle_meta_list(text: str, game_choice: str | None) -> bool:
+    if _is_meta_explanation_question(text):
+        return False
+    return (
+        _is_meta_weapon_request(text, game_choice)
+        or _is_direct_meta_scope(text, game_choice)
+        or is_meta_request(text)
+    )
+
+
+def _safe_loadout_error(exc: MetaEngineError) -> str:
+    text = str(exc)
+    if text in {LOADOUT_NOT_FOUND_MESSAGE, CHECKER_FAIL_MESSAGE}:
+        return CHECKER_FAIL_MESSAGE
+    return text
 
 
 def _memory_summary(user_text: str, answer: str) -> str:
@@ -832,13 +902,14 @@ async def text_handler(
     last_meta = _meta_weapons_from_context(message) or _reply_meta_weapons(message)
     selected_weapon = find_selected_weapon(text, last_meta)
     game_choice = requested_game(text)
+    is_explanation = _is_meta_explanation_question(text)
 
-    if chat_data.get("awaiting_meta_game") and game_choice:
+    if not is_explanation and chat_data.get("awaiting_meta_game") and game_choice:
         await _handle_meta_request(message, text, chat_data, codmunity_client)
         await _save_memory(message, stats_service, text, "Meta ro'yxati so'raldi.")
         return
 
-    if chat_data.get("awaiting_ranked_type") and game_choice:
+    if not is_explanation and chat_data.get("awaiting_ranked_type") and game_choice:
         ranked_text = text
         if game_choice == "battle_royale":
             ranked_text = "BR Ranked"
@@ -855,6 +926,13 @@ async def text_handler(
         return
 
     if selected_weapon:
+        logger.info(
+            "selected weapon from context chat=%s user=%s weapon=%s source=%s",
+            message.chat.id,
+            message.from_user.id if message.from_user else None,
+            selected_weapon.name,
+            selected_weapon.source,
+        )
         await _handle_selected_weapon(message, selected_weapon, codmunity_client)
         await _save_memory(message, stats_service, text, "Loadout ochildi.")
         return
@@ -863,14 +941,9 @@ async def text_handler(
         await message.reply("Ro'yxatda bunaqa raqam yo'q")
         return
 
-    if _is_direct_meta_scope(text, game_choice):
+    if _should_handle_meta_list(text, game_choice):
         await _handle_meta_request(message, text, chat_data, codmunity_client)
         await _save_memory(message, stats_service, text, "Meta turi so'raldi.")
-        return
-
-    if is_meta_request(text):
-        await _handle_meta_request(message, text, chat_data, codmunity_client)
-        await _save_memory(message, stats_service, text, "Meta ro'yxati so'raldi.")
         return
 
     if is_loadout_request(text):
@@ -949,7 +1022,7 @@ async def _handle_named_loadout_request(
             f"{format_weapon_loadout(weapon)}"
         )
     except MetaEngineError as exc:
-        await status.edit_text(str(exc))
+        await status.edit_text(_safe_loadout_error(exc))
     except Exception:
         logger.exception("Named loadout handling failed")
         await status.edit_text("Aniq ma'lumot topolmadim.")
@@ -970,7 +1043,7 @@ async def _handle_selected_weapon(
         weapon = codmunity_client.get_weapon_loadout(selected_weapon)
         await status.edit_text(format_weapon_loadout(weapon))
     except MetaEngineError as exc:
-        await status.edit_text(str(exc))
+        await status.edit_text(_safe_loadout_error(exc))
     except Exception:
         logger.exception("Selected weapon handling failed")
         await status.edit_text("CODMunity'dan ma'lumot olishda muammo bo'ldi")
