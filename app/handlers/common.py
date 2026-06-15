@@ -834,6 +834,21 @@ async def keys_status_handler(
     await message.reply("\n".join(rows))
 
 
+@router.message(Command("vision_status"))
+async def vision_status_handler(
+    message: Message,
+    ai_provider: AIProvider,
+    settings: Settings,
+) -> None:
+    if not _is_owner(message, settings):
+        return
+    if message.chat.type != "private":
+        return
+
+    rows = await ai_provider.vision_status()
+    await message.reply("\n".join(rows))
+
+
 @router.message(Command("image"))
 async def image_command_handler(
     message: Message,

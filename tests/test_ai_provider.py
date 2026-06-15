@@ -170,6 +170,29 @@ class OpenRouterProviderTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_vision_status_uses_image_payload(self):
+        FakeSession.responses = [
+            FakeResponse(200, {"choices": [{"message": {"content": "red"}}]}),
+            FakeResponse(200, {"choices": [{"message": {"content": "not sure"}}]}),
+        ]
+        provider = OpenRouterProvider(
+            api_keys=[(1, "secret-key-1")],
+            models=["chat-model"],
+            vision_models=["vision-model-1", "vision-model-2"],
+            image_models=[],
+            app_name="Lola",
+        )
+
+        rows = await provider.vision_status()
+        text = "\n".join(rows)
+
+        self.assertIn("KEY_1:", text)
+        self.assertIn("- vision model: OK", text)
+        self.assertIn("- vision model 2: image-not-understood", text)
+        self.assertNotIn("secret-key", text)
+        self.assertEqual([attempt["model"] for attempt in FakeSession.attempts], ["vision-model-1", "vision-model-2"])
+        self.assertIsInstance(FakeSession.attempts[0]["content"], list)
+
 
 if __name__ == "__main__":
     unittest.main()

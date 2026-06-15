@@ -22,6 +22,9 @@ TIMEOUT_COOLDOWN_SECONDS = 2 * 60
 KEY_STATUS_TIMEOUT_SECONDS = 8
 CHAT_KEY_PRIORITY = (1, 3, 2, 4, 5)
 VISION_KEY_PRIORITY = (1, 3, 2, 4, 5)
+VISION_STATUS_IMAGE_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+)
 
 SYSTEM_PROMPT = """
 Sen Lola ismli Telegram botisan.
@@ -92,6 +95,10 @@ class AIProvider(ABC):
     async def keys_status(self) -> list[str]:
         raise NotImplementedError
 
+    @abstractmethod
+    async def vision_status(self) -> list[str]:
+        raise NotImplementedError
+
 
 class NullAIProvider(AIProvider):
     async def ask_ai(self, text: str, user_name: str, reply_context: str = "") -> str:
@@ -110,6 +117,9 @@ class NullAIProvider(AIProvider):
         return GeneratedImage(error=IMAGE_GENERATION_ERROR_MESSAGE)
 
     async def keys_status(self) -> list[str]:
+        return ["KEY_1: not configured"]
+
+    async def vision_status(self) -> list[str]:
         return ["KEY_1: not configured"]
 
 
@@ -251,6 +261,23 @@ class OpenRouterProvider(AIProvider):
 
         return results[:-1] if results and results[-1] == "" else results
 
+    async def vision_status(self) -> list[str]:
+        if not self.api_keys:
+            return ["KEY_1: not configured"]
+        if not self.vision_models:
+            return ["Vision model configured emas"]
+
+        results: list[str] = []
+        for key_index, api_key in self.api_keys:
+            results.append(f"KEY_{key_index}:")
+            for index, model in enumerate(self.vision_models, start=1):
+                label = "vision model" if index == 1 else f"vision model {index}"
+                status = await self._check_vision_key_model(key_index, api_key, model)
+                results.append(f"- {label}: {status}")
+            results.append("")
+
+        return results[:-1] if results and results[-1] == "" else results
+
     def _key_status_checks(self) -> list[tuple[str, str | None]]:
         checks: list[tuple[str, str | None]] = []
         chat_model = self.models[0] if self.models else None
@@ -297,6 +324,54 @@ class OpenRouterProvider(AIProvider):
 
         _log_key_status_result(key_index, model, status)
         return status
+
+    async def _check_vision_key_model(self, key_index: int, api_key: str, model: str) -> str:
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Bu rasm qanday rang? Faqat red deb javob ber."},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{VISION_STATUS_IMAGE_BASE64}"},
+                        },
+                    ],
+                }
+            ],
+            "temperature": 0,
+            "max_tokens": 10,
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "X-Title": self.app_name,
+        }
+        try:
+            timeout = aiohttp.ClientTimeout(total=KEY_STATUS_TIMEOUT_SECONDS)
+            async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+                async with session.post(OPENROUTER_CHAT_URL, json=payload) as response:
+                    data = await _response_data(response)
+                    rate_headers = _rate_limit_headers(response)
+                    if response.status >= 400:
+                        status = _key_status_label(response.status, data, rate_headers)
+                    elif _vision_probe_understood(data):
+                        status = "OK"
+                    else:
+                        status = "image-not-understood"
+        except TimeoutError:
+            status = "timeout"
+        except aiohttp.ClientError as exc:
+            status = "request failed"
+            logger.warning("KEY_%s model=%s failed status=request_failed reason=%s", key_index, model, exc)
+        except Exception as exc:
+            status = "unexpected error"
+            logger.warning("KEY_%s model=%s failed status=unexpected_error reason=%s", key_index, model, exc)
+
+        _log_key_status_result(key_index, model, status)
+        return status
+
 
     async def _chat_completion(self, payload: dict, models: list[str], operation: str) -> str:
         data = await self._completion_data(
@@ -730,6 +805,14 @@ def _has_text_content(data: Any) -> bool:
     except (KeyError, IndexError, TypeError):
         return False
     return bool(content)
+
+
+def _vision_probe_understood(data: Any) -> bool:
+    try:
+        content = str(data["choices"][0]["message"]["content"]).lower()
+    except (KeyError, IndexError, TypeError):
+        return False
+    return "red" in content or "qizil" in content
 
 
 def _has_generated_image(data: Any) -> bool:
