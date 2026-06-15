@@ -84,11 +84,15 @@ class OpenRouterProviderTest(unittest.IsolatedAsyncioTestCase):
         FakeSession.responses = [
             FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]}),
             FakeResponse(429, {"error": "rate limit"}, {"X-RateLimit-Remaining": "0"}),
+            FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]}),
+            FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]}),
+            FakeResponse(429, {"error": "rate limit"}, {"X-RateLimit-Remaining": "0"}),
+            FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]}),
         ]
         provider = OpenRouterProvider(
             api_keys=["secret-key-1", "secret-key-2"],
-            models=["free-model"],
-            vision_models=[],
+            models=["chat-model", "fallback-model"],
+            vision_models=["vision-model"],
             image_models=[],
             app_name="Lola",
         )
@@ -96,9 +100,23 @@ class OpenRouterProviderTest(unittest.IsolatedAsyncioTestCase):
         rows = await provider.keys_status()
         text = "\n".join(rows)
 
-        self.assertIn("KEY_1: OK", text)
-        self.assertIn("KEY_2: 429 rate limit", text)
+        self.assertIn("KEY_1:", text)
+        self.assertIn("- chat model: OK", text)
+        self.assertIn("- vision model: 429 rate limit", text)
+        self.assertIn("- fallback model: OK", text)
+        self.assertIn("KEY_2:", text)
         self.assertNotIn("secret-key", text)
+        self.assertEqual(
+            [attempt["model"] for attempt in FakeSession.attempts],
+            [
+                "chat-model",
+                "vision-model",
+                "fallback-model",
+                "chat-model",
+                "vision-model",
+                "fallback-model",
+            ],
+        )
 
 
 if __name__ == "__main__":

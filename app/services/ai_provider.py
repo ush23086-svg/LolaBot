@@ -233,44 +233,68 @@ class OpenRouterProvider(AIProvider):
         if not self.api_keys:
             return ["KEY_1: not configured"]
 
-        model = self.models[0] if self.models else "google/gemma-4-31b-it:free"
+        checks = self._key_status_checks()
+        results: list[str] = []
+        for key_index, api_key in enumerate(self.api_keys, start=1):
+            results.append(f"KEY_{key_index}:")
+            for label, model in checks:
+                if not model:
+                    results.append(f"- {label}: skipped")
+                    logger.info("KEY_%s model=none status=skipped label=%s", key_index, label)
+                    continue
+
+                status = await self._check_key_model(key_index, api_key, model)
+                results.append(f"- {label}: {status}")
+            results.append("")
+
+        return results[:-1] if results and results[-1] == "" else results
+
+    def _key_status_checks(self) -> list[tuple[str, str | None]]:
+        checks: list[tuple[str, str | None]] = []
+        chat_model = self.models[0] if self.models else None
+        checks.append(("chat model", chat_model))
+
+        vision_models = self.vision_models or [None]
+        for index, model in enumerate(vision_models, start=1):
+            label = "vision model" if index == 1 else f"vision model {index}"
+            checks.append((label, model))
+
+        for index, model in enumerate(self.models[1:], start=1):
+            label = "fallback model" if index == 1 else f"fallback model {index}"
+            checks.append((label, model))
+
+        return checks
+
+    async def _check_key_model(self, key_index: int, api_key: str, model: str) -> str:
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": "hi"}],
             "temperature": 0,
             "max_tokens": 5,
         }
-        results: list[str] = []
-        for key_index, api_key in enumerate(self.api_keys, start=1):
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "X-Title": self.app_name,
-            }
-            try:
-                timeout = aiohttp.ClientTimeout(total=KEY_STATUS_TIMEOUT_SECONDS)
-                async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-                    async with session.post(OPENROUTER_CHAT_URL, json=payload) as response:
-                        data = await _response_data(response)
-                        rate_headers = _rate_limit_headers(response)
-                        status = _key_status_label(response.status, data, rate_headers)
-            except TimeoutError:
-                status = "timeout"
-            except aiohttp.ClientError as exc:
-                status = "request failed"
-                logger.warning("KEY_%s model=%s status=request failed reason=%s", key_index, model, exc)
-            except Exception as exc:
-                status = "unexpected error"
-                logger.warning("KEY_%s model=%s status=unexpected error reason=%s", key_index, model, exc)
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "X-Title": self.app_name,
+        }
+        try:
+            timeout = aiohttp.ClientTimeout(total=KEY_STATUS_TIMEOUT_SECONDS)
+            async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+                async with session.post(OPENROUTER_CHAT_URL, json=payload) as response:
+                    data = await _response_data(response)
+                    rate_headers = _rate_limit_headers(response)
+                    status = _key_status_label(response.status, data, rate_headers)
+        except TimeoutError:
+            status = "timeout"
+        except aiohttp.ClientError as exc:
+            status = "request failed"
+            logger.warning("KEY_%s model=%s failed status=request_failed reason=%s", key_index, model, exc)
+        except Exception as exc:
+            status = "unexpected error"
+            logger.warning("KEY_%s model=%s failed status=unexpected_error reason=%s", key_index, model, exc)
 
-            log_status, reason = _split_key_status(status)
-            if reason:
-                logger.info("KEY_%s model=%s status=%s reason=%s", key_index, model, log_status, reason)
-            else:
-                logger.info("KEY_%s model=%s status=%s", key_index, model, log_status)
-            results.append(f"KEY_{key_index}: {status}")
-
-        return results
+        _log_key_status_result(key_index, model, status)
+        return status
 
     async def _chat_completion(self, payload: dict, models: list[str]) -> str:
         data = await self._completion_data(
@@ -332,7 +356,7 @@ class OpenRouterProvider(AIProvider):
                                 rate_headers = _rate_limit_headers(response)
                                 reason = _rotation_reason(response.status, data, rate_headers)
                                 logger.warning(
-                                    "KEY_%s model=%s status=%s reason=%s operation=%s rate=%s",
+                                    "KEY_%s model=%s failed status=%s reason=%s operation=%s rate=%s",
                                     key_index,
                                     model,
                                     response.status,
@@ -355,7 +379,7 @@ class OpenRouterProvider(AIProvider):
                                 continue
                 except aiohttp.ClientError as exc:
                     logger.exception(
-                        "KEY_%s model=%s status=request_failed reason=%s operation=%s",
+                        "KEY_%s model=%s failed status=request_failed reason=%s operation=%s",
                         key_index,
                         model,
                         exc,
@@ -366,7 +390,7 @@ class OpenRouterProvider(AIProvider):
                     reason = "timeout"
                     self._cooldown_key(key_index, reason, seconds=TIMEOUT_COOLDOWN_SECONDS)
                     logger.warning(
-                        "KEY_%s model=%s status=timeout reason=%s operation=%s",
+                        "KEY_%s model=%s failed status=timeout reason=%s operation=%s",
                         key_index,
                         model,
                         exc,
@@ -411,7 +435,7 @@ class OpenRouterProvider(AIProvider):
                     )
                     continue
 
-                logger.info("KEY_%s model=%s status=OK operation=%s", key_index, model, operation)
+                logger.info("KEY_%s model=%s success status=OK operation=%s", key_index, model, operation)
                 return data
 
         logger.error(
@@ -546,6 +570,17 @@ def _split_key_status(status: str) -> tuple[str, str]:
         return status, ""
     code, _, reason = status.partition(" ")
     return code, reason
+
+
+def _log_key_status_result(key_index: int, model: str, status: str) -> None:
+    log_status, reason = _split_key_status(status)
+    if status == "OK":
+        logger.info("KEY_%s model=%s success status=OK", key_index, model)
+        return
+    if reason:
+        logger.warning("KEY_%s model=%s failed status=%s reason=%s", key_index, model, log_status, reason)
+    else:
+        logger.warning("KEY_%s model=%s failed status=%s", key_index, model, log_status)
 
 
 def _rotation_reason(status: int, data: Any, rate_headers: dict[str, str]) -> str:
