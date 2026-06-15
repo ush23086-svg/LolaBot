@@ -629,8 +629,19 @@ async def premium_callback_handler(callback: CallbackQuery) -> None:
 async def pre_checkout_handler(query: PreCheckoutQuery) -> None:
     payload = query.invoice_payload or ""
     plan_key = payload.removeprefix("premium:")
-    if plan_key not in PREMIUM_PLANS:
+    plan = PREMIUM_PLANS.get(plan_key)
+    if not plan:
         await query.answer(ok=False, error_message="Tarif topilmadi.")
+        return
+    if query.total_amount != plan["stars"]:
+        logger.warning(
+            "Premium pre-checkout amount mismatch user=%s plan=%s expected=%s actual=%s",
+            query.from_user.id if query.from_user else None,
+            plan_key,
+            plan["stars"],
+            query.total_amount,
+        )
+        await query.answer(ok=False, error_message="To'lov summasi tarifga mos kelmadi.")
         return
 
     await query.answer(ok=True)
@@ -648,6 +659,17 @@ async def successful_payment_handler(message: Message, stats_service: StatsServi
     plan = PREMIUM_PLANS.get(plan_key)
     if not plan:
         await message.reply("To'lov qabul qilindi, lekin tarif topilmadi.")
+        return
+    if payment.total_amount != plan["stars"]:
+        logger.warning(
+            "Premium successful_payment amount mismatch user=%s plan=%s expected=%s actual=%s charge=%s",
+            user.id,
+            plan_key,
+            plan["stars"],
+            payment.total_amount,
+            payment.telegram_payment_charge_id,
+        )
+        await message.reply("To'lov summasi tarifga mos kelmadi. Premium yoqilmadi.")
         return
 
     try:
