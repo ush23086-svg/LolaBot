@@ -455,9 +455,14 @@ def _is_direct_meta_scope(text: str, game_choice: str | None) -> bool:
 
 def _is_meta_explanation_question(text: str) -> bool:
     query = normalize_text(text)
-    if not ("ranked" in query or "resurgence" in query or "brranked" in query):
+    if not ("ranked" in query or "resurgence" in query):
         return False
     return any(marker in query for marker in META_EXPLANATION_MARKERS)
+
+
+def _is_ranked_mode_explanation(text: str) -> bool:
+    query = normalize_text(text)
+    return "ranked" in query and any(marker in query for marker in META_EXPLANATION_MARKERS)
 
 
 def _is_meta_weapon_request(text: str, game_choice: str | None) -> bool:
@@ -925,20 +930,9 @@ async def text_handler(
         await _save_memory(message, stats_service, text, "Meta ro'yxati so'raldi.")
         return
 
-    if not is_explanation and chat_data.get("awaiting_ranked_type") and game_choice:
-        ranked_text = text
-        if game_choice == "battle_royale":
-            ranked_text = "BR Ranked"
-        elif game_choice == "resurgence":
-            ranked_text = "Resurgence Ranked"
-
-        if requested_game(ranked_text) in {"br_ranked", "resurgence_ranked"}:
-            await _handle_meta_request(message, ranked_text, chat_data, codmunity_client)
-            await _save_memory(message, stats_service, text, "Ranked meta ro'yxati so'raldi.")
-            return
-
-        await message.reply("BR Ranked kerakmi yoki Resurgence Rankedmi?")
-        await _save_memory(message, stats_service, text, "Ranked meta ro'yxati so'raldi.")
+    if _is_ranked_mode_explanation(text):
+        await message.reply("Hozir BR Ranked yo'q, faqat Resurgence Ranked bor.")
+        await _save_memory(message, stats_service, text, "Ranked farqi tushuntirildi.")
         return
 
     if _should_handle_meta_list(text, game_choice):
@@ -992,21 +986,17 @@ async def _handle_meta_request(
         await message.reply("Qaysi meta kerak: Warzone, Ranked yoki MW3?")
         return
 
-    if game == "ranked":
-        chat_data.pop("awaiting_meta_game", None)
-        chat_data["awaiting_ranked_type"] = True
-        await message.reply("BR Ranked kerakmi yoki Resurgence Rankedmi?")
-        return
-
     chat_data.pop("awaiting_meta_game", None)
     chat_data.pop("awaiting_ranked_type", None)
+    if game == "ranked_unavailable":
+        await message.reply("Hozir BR Ranked yo'q, faqat Resurgence Ranked bor.")
+        game = "resurgence_ranked"
+
     status = await message.reply("CODMunity'dan meta ma'lumotni olyapman...")
 
     try:
         if game == "mw3":
             weapons = codmunity_client.get_mw3_meta()
-        elif game == "br_ranked":
-            weapons = codmunity_client.get_br_ranked_meta()
         elif game == "resurgence_ranked":
             weapons = codmunity_client.get_resurgence_ranked_meta()
         elif game == "resurgence":

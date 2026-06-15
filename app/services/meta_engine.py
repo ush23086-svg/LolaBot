@@ -16,7 +16,6 @@ RANKED_META_URL = f"{BASE_URL}/warzoneranked"
 WZSTATS_BASE_URL = "https://wzstats.gg"
 WZSTATS_WARZONE_META_URL = f"{WZSTATS_BASE_URL}/"
 WZSTATS_MW3_META_URL = f"{WZSTATS_BASE_URL}/mw3/meta"
-WZSTATS_RANKED_META_URL = f"{WZSTATS_BASE_URL}/warzone/meta/ranked"
 WZSTATS_RESURGENCE_META_URL = f"{WZSTATS_BASE_URL}/warzone/meta/resurgence"
 WZSTATS_RESURGENCE_RANKED_META_URL = f"{WZSTATS_BASE_URL}/warzone/meta/ranked/resurgence"
 META_NOT_FOUND_MESSAGE = "Meta manbalaridan aniq ma'lumot topilmadi, keyinroq qayta urinib ko'ring."
@@ -98,7 +97,6 @@ class Attachment:
 
 def meta_mode_label(game: str | None) -> str:
     return {
-        "br_ranked": "BR Ranked",
         "resurgence_ranked": "Resurgence Ranked",
         "resurgence": "Resurgence",
         "battle_royale": "Battle Royale",
@@ -197,16 +195,7 @@ class CodmunityClient:
         )
 
     def get_ranked_meta(self, limit: int = 6) -> list[MetaWeapon]:
-        return self.get_br_ranked_meta(limit)
-
-    def get_br_ranked_meta(self, limit: int = 6) -> list[MetaWeapon]:
-        try:
-            weapons = self._get_wzstats_meta(WZSTATS_RANKED_META_URL, game="br_ranked", limit=limit)
-            logger.info("source_attempt=WZStatsGG success mode=br_ranked primary parsed_weapons=%s", len(weapons))
-            return weapons
-        except MetaEngineError as exc:
-            logger.warning("source_attempt=WZStatsGG fail mode=br_ranked primary reason=%s", exc)
-            raise MetaEngineError(META_NOT_FOUND_MESSAGE) from exc
+        return self.get_resurgence_ranked_meta(limit)
 
     def get_resurgence_ranked_meta(self, limit: int = 6) -> list[MetaWeapon]:
         return self._get_meta_with_fallback(
@@ -349,10 +338,6 @@ def get_mw3_meta(limit: int = 6, timeout: int = 15) -> list[dict]:
 
 def get_ranked_meta(limit: int = 6, timeout: int = 15) -> list[dict]:
     return [weapon.to_dict() for weapon in CodmunityClient(timeout).get_ranked_meta(limit)]
-
-
-def get_br_ranked_meta(limit: int = 6, timeout: int = 15) -> list[dict]:
-    return [weapon.to_dict() for weapon in CodmunityClient(timeout).get_br_ranked_meta(limit)]
 
 
 def get_resurgence_ranked_meta(limit: int = 6, timeout: int = 15) -> list[dict]:
@@ -528,10 +513,10 @@ def requested_game(text: str) -> str | None:
         return "mw3"
     if ("resurgence" in query or "rezurgence" in query) and ("ranked" in query or "rank" in query):
         return "resurgence_ranked"
-    if ("br" in query or "battleroyale" in query) and ("ranked" in query or "rank" in query):
-        return "br_ranked"
     if "ranked" in query or "rank" in query:
-        return "ranked"
+        if "br" in query or "battleroyale" in query:
+            return "ranked_unavailable"
+        return "resurgence_ranked"
     if "resurgence" in query or "rezurgence" in query:
         return "resurgence"
     if "battleroyale" in query or query == "br":
@@ -869,13 +854,6 @@ def _is_absolute_meta_heading(line: str, game: str) -> bool:
     normalized = normalize_text(line)
     if game == "warzone":
         game_aliases = {"warzone"}
-    elif game in {"ranked", "br_ranked"}:
-        game_aliases = {"ranked", "warzoneranked"}
-        return (
-            normalized.endswith("absolutemeta")
-            and (normalized == "absolutemeta" or any(alias in normalized for alias in game_aliases))
-            and "resurgence" not in normalized
-        )
     elif game == "resurgence_ranked":
         return normalized.endswith("absolutemeta") and (
             normalized == "absolutemeta" or ("resurgence" in normalized and "ranked" in normalized)
@@ -896,7 +874,7 @@ def _codmunity_page_mode(lines: list[str]) -> str | None:
     if "rankedplaymeta" in normalized or "rankedplay" in normalized:
         if "resurgence" in normalized or "havenshollow" in normalized:
             return "resurgence_ranked"
-        return "br_ranked"
+        return "resurgence_ranked"
     if "mw3meta" in normalized or "modernwarfare3" in normalized:
         return "mw3"
     if "warzonemeta" in normalized or "currentwarzonemeta" in normalized:
