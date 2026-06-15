@@ -200,12 +200,13 @@ class CodmunityClient:
         return self.get_br_ranked_meta(limit)
 
     def get_br_ranked_meta(self, limit: int = 6) -> list[MetaWeapon]:
-        return self._get_meta_with_fallback(
-            codmunity_url=RANKED_META_URL,
-            wzstats_url=WZSTATS_RANKED_META_URL,
-            game="br_ranked",
-            limit=limit,
-        )
+        try:
+            weapons = self._get_wzstats_meta(WZSTATS_RANKED_META_URL, game="br_ranked", limit=limit)
+            logger.info("source_attempt=WZStatsGG success mode=br_ranked primary parsed_weapons=%s", len(weapons))
+            return weapons
+        except MetaEngineError as exc:
+            logger.warning("source_attempt=WZStatsGG fail mode=br_ranked primary reason=%s", exc)
+            raise MetaEngineError(META_NOT_FOUND_MESSAGE) from exc
 
     def get_resurgence_ranked_meta(self, limit: int = 6) -> list[MetaWeapon]:
         return self._get_meta_with_fallback(
@@ -283,6 +284,15 @@ class CodmunityClient:
         soup = self._fetch_soup(url)
         links = _weapon_links(soup)
         lines = _visible_lines(soup)
+        page_mode = _codmunity_page_mode(lines)
+        if page_mode and not _codmunity_mode_matches(game, page_mode):
+            reason = (
+                f"CODMunity mode mismatch: requested={meta_mode_label(game)} "
+                f"page={meta_mode_label(page_mode)}"
+            )
+            logger.warning("source_attempt=CODMunity fail mode=%s reason=%s", game, reason)
+            raise MetaEngineError(reason)
+
         weapons = _parse_meta_lines(lines, links=links, game=game, limit=limit)
         heading_found = _has_absolute_meta_heading(lines, game)
 
@@ -879,6 +889,27 @@ def _is_absolute_meta_heading(line: str, game: str) -> bool:
 
 def _has_absolute_meta_heading(lines: list[str], game: str) -> bool:
     return any(_is_absolute_meta_heading(_clean_line(line), game) for line in lines)
+
+
+def _codmunity_page_mode(lines: list[str]) -> str | None:
+    normalized = normalize_text(" ".join(lines[:220]))
+    if "rankedplaymeta" in normalized or "rankedplay" in normalized:
+        if "resurgence" in normalized or "havenshollow" in normalized:
+            return "resurgence_ranked"
+        return "br_ranked"
+    if "mw3meta" in normalized or "modernwarfare3" in normalized:
+        return "mw3"
+    if "warzonemeta" in normalized or "currentwarzonemeta" in normalized:
+        return "warzone"
+    return None
+
+
+def _codmunity_mode_matches(requested: str, page_mode: str) -> bool:
+    if requested == page_mode:
+        return True
+    if requested == "battle_royale" and page_mode == "warzone":
+        return True
+    return False
 
 
 def _is_meta_contenders_heading(line: str) -> bool:

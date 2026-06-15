@@ -20,6 +20,8 @@ from app.services.meta_engine import (
     CodmunityClient,
     MetaEngineError,
     MetaWeapon,
+    _codmunity_mode_matches,
+    _codmunity_page_mode,
     _is_absolute_meta_heading,
     check_loadout_answer,
     find_selected_weapon,
@@ -182,9 +184,30 @@ class MetaSelectionTest(unittest.TestCase):
         self.assertTrue(_should_handle_meta_list("BR Ranked uchun qurol ber", requested_game("BR Ranked uchun qurol ber")))
         self.assertTrue(_should_handle_meta_list("Ranked", requested_game("Ranked")))
 
+    def test_br_ranked_uses_wzstats_primary(self):
+        client = object.__new__(CodmunityClient)
+        calls = {"codmunity": 0, "wzstats": 0}
+
+        def codmunity_meta(url, game, limit):
+            calls["codmunity"] += 1
+            raise AssertionError("BR Ranked should not call CODMunity")
+
+        def wzstats_meta(url, game, limit):
+            calls["wzstats"] += 1
+            return [MetaWeapon("Carbon 57", "Close Range", "", game=game, source="WZStatsGG")]
+
+        client._get_codmunity_meta = codmunity_meta
+        client._get_wzstats_meta = wzstats_meta
+
+        weapons = client.get_br_ranked_meta()
+
+        self.assertEqual(weapons[0].source, "WZStatsGG")
+        self.assertEqual(calls["codmunity"], 0)
+        self.assertEqual(calls["wzstats"], 1)
+
     def test_codmunity_success_skips_wzstats_fallback(self):
         client = object.__new__(CodmunityClient)
-        codmunity_weapon = MetaWeapon("AK-27", "Long Range", "", game="br_ranked", source="CODMunity")
+        codmunity_weapon = MetaWeapon("AK-27", "Long Range", "", game="resurgence_ranked", source="CODMunity")
         calls = {"wzstats": 0}
 
         def codmunity_meta(url, game, limit):
@@ -197,7 +220,7 @@ class MetaSelectionTest(unittest.TestCase):
         client._get_codmunity_meta = codmunity_meta
         client._get_wzstats_meta = wzstats_meta
 
-        weapons = client._get_meta_with_fallback("codmunity", "wzstats", "br_ranked", 6)
+        weapons = client._get_meta_with_fallback("codmunity", "wzstats", "resurgence_ranked", 6)
 
         self.assertEqual(weapons[0].source, "CODMunity")
         self.assertEqual(calls["wzstats"], 0)
@@ -219,8 +242,13 @@ class MetaSelectionTest(unittest.TestCase):
         self.assertEqual(weapons[0].source, "WZStatsGG fallback")
 
     def test_codmunity_ranked_absolute_meta_heading_is_accepted(self):
-        self.assertTrue(_is_absolute_meta_heading("Absolute Meta", "br_ranked"))
         self.assertTrue(_is_absolute_meta_heading("Absolute Meta", "resurgence_ranked"))
+
+    def test_codmunity_page_mode_detects_resurgence_ranked(self):
+        lines = ["Warzone Ranked Play Meta", "Season 4 brings Ranked to Haven's Hollow (Resurgence) map."]
+        self.assertEqual(_codmunity_page_mode(lines), "resurgence_ranked")
+        self.assertTrue(_codmunity_mode_matches("resurgence_ranked", "resurgence_ranked"))
+        self.assertFalse(_codmunity_mode_matches("br_ranked", "resurgence_ranked"))
 
 
 if __name__ == "__main__":
