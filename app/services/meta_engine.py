@@ -863,11 +863,13 @@ def _is_absolute_meta_heading(line: str, game: str) -> bool:
         game_aliases = {"ranked", "warzoneranked"}
         return (
             normalized.endswith("absolutemeta")
-            and any(alias in normalized for alias in game_aliases)
+            and (normalized == "absolutemeta" or any(alias in normalized for alias in game_aliases))
             and "resurgence" not in normalized
         )
     elif game == "resurgence_ranked":
-        return normalized.endswith("absolutemeta") and "resurgence" in normalized and "ranked" in normalized
+        return normalized.endswith("absolutemeta") and (
+            normalized == "absolutemeta" or ("resurgence" in normalized and "ranked" in normalized)
+        )
     elif game == "resurgence":
         game_aliases = {"resurgence"}
     else:

@@ -47,7 +47,10 @@ class FakeSession:
         )
         if not FakeSession.responses:
             raise AssertionError("No fake response queued")
-        return FakeSession.responses.pop(0)
+        response = FakeSession.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 class OpenRouterProviderTest(unittest.IsolatedAsyncioTestCase):
@@ -66,7 +69,7 @@ class OpenRouterProviderTest(unittest.IsolatedAsyncioTestCase):
             FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]}),
         ]
         provider = OpenRouterProvider(
-            api_keys=["secret-key-1", "secret-key-2"],
+            api_keys=[(1, "secret-key-1"), (3, "secret-key-3")],
             models=["free-model"],
             vision_models=[],
             image_models=[],
@@ -78,7 +81,56 @@ class OpenRouterProviderTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer, "ok")
         self.assertEqual(len(FakeSession.attempts), 2)
         self.assertEqual(FakeSession.attempts[0]["authorization"], "Bearer secret-key-1")
-        self.assertEqual(FakeSession.attempts[1]["authorization"], "Bearer secret-key-2")
+        self.assertEqual(FakeSession.attempts[1]["authorization"], "Bearer secret-key-3")
+
+    async def test_chat_uses_preferred_key_order(self):
+        FakeSession.responses = [
+            FakeResponse(429, {"error": "rate limit"}, {"X-RateLimit-Remaining": "0"}),
+            FakeResponse(429, {"error": "rate limit"}, {"X-RateLimit-Remaining": "0"}),
+            FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]}),
+        ]
+        provider = OpenRouterProvider(
+            api_keys=[
+                (1, "secret-key-1"),
+                (2, "secret-key-2"),
+                (3, "secret-key-3"),
+                (4, "secret-key-4"),
+                (5, "secret-key-5"),
+            ],
+            models=["chat-model"],
+            vision_models=[],
+            image_models=[],
+            app_name="Lola",
+        )
+
+        answer = await provider.ask_ai("hi", "Tester")
+
+        self.assertEqual(answer, "ok")
+        self.assertEqual(
+            [attempt["authorization"] for attempt in FakeSession.attempts],
+            ["Bearer secret-key-1", "Bearer secret-key-3", "Bearer secret-key-2"],
+        )
+
+    async def test_vision_falls_back_to_second_model_before_next_key(self):
+        FakeSession.responses = [
+            TimeoutError("slow vision model"),
+            FakeResponse(200, {"choices": [{"message": {"content": "vision ok"}}]}),
+        ]
+        provider = OpenRouterProvider(
+            api_keys=[(1, "secret-key-1"), (3, "secret-key-3")],
+            models=["chat-model"],
+            vision_models=["vision-model-1", "vision-model-2"],
+            image_models=[],
+            app_name="Lola",
+        )
+
+        answer = await provider.analyze_image("aW1hZ2U=", "Tester")
+
+        self.assertEqual(answer, "vision ok")
+        self.assertEqual(
+            [attempt["model"] for attempt in FakeSession.attempts],
+            ["vision-model-1", "vision-model-2"],
+        )
 
     async def test_keys_status_masks_real_keys(self):
         FakeSession.responses = [

@@ -59,7 +59,7 @@ PREMIUM_PLANS = {
         "title": "Lola Premium - 1 oy",
         "description": "30 kun premium kirish.",
         "label": "1 oy premium",
-        "stars": 399,
+        "stars": 250,
         "days": 30,
     },
 }
@@ -374,7 +374,7 @@ def _premium_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    text="1 oy premium - 399 Stars",
+                    text="1 oy premium - 250 Stars",
                     callback_data="premium:month",
                 )
             ],
@@ -586,7 +586,7 @@ async def premium_handler(message: Message) -> None:
     await message.reply(
         "Premium tariflar:\n\n"
         "1 kun test - 29 Stars\n"
-        "1 oy premium - 399 Stars",
+        "1 oy premium - 250 Stars",
         reply_markup=_premium_keyboard(),
     )
 

@@ -20,6 +20,8 @@ IMAGE_GENERATION_ERROR_MESSAGE = "Rasm yaratishda muammo bo'ldi. Keyinroq urinib
 KEY_COOLDOWN_SECONDS = 10 * 60
 TIMEOUT_COOLDOWN_SECONDS = 2 * 60
 KEY_STATUS_TIMEOUT_SECONDS = 8
+CHAT_KEY_PRIORITY = (1, 3, 2, 4, 5)
+VISION_KEY_PRIORITY = (1, 3, 2, 4, 5)
 
 SYSTEM_PROMPT = """
 Sen Lola ismli Telegram botisan.
@@ -114,18 +116,18 @@ class NullAIProvider(AIProvider):
 class OpenRouterProvider(AIProvider):
     def __init__(
         self,
-        api_keys: list[str],
+        api_keys: list[str] | list[tuple[int, str]],
         models: list[str],
         vision_models: list[str],
         image_models: list[str],
         app_name: str,
     ) -> None:
-        self.api_keys = api_keys
+        self.api_keys = _normalize_key_slots(api_keys)
         self.models = models
         self.vision_models = vision_models
         self.image_models = image_models
         self.app_name = app_name
-        self._key_cooldowns: dict[int, float] = {}
+        self._key_cooldowns: dict[tuple[str, int], tuple[float, str]] = {}
 
     async def ask_ai(self, text: str, user_name: str, reply_context: str = "") -> str:
         user_content = f"Foydalanuvchi: {user_name}\n"
@@ -143,7 +145,7 @@ class OpenRouterProvider(AIProvider):
             "temperature": 0.6,
             "max_tokens": 700,
         }
-        return await self._chat_completion(payload, self.models)
+        return await self._chat_completion(payload, self.models, operation="chat")
 
     async def analyze_image(
         self,
@@ -190,7 +192,7 @@ class OpenRouterProvider(AIProvider):
             "temperature": 0.4,
             "max_tokens": 900,
         }
-        return await self._chat_completion(payload, self._image_models())
+        return await self._chat_completion(payload, self._image_models(), operation="vision")
 
     def _image_models(self) -> list[str]:
         return self.vision_models
@@ -235,7 +237,7 @@ class OpenRouterProvider(AIProvider):
 
         checks = self._key_status_checks()
         results: list[str] = []
-        for key_index, api_key in enumerate(self.api_keys, start=1):
+        for key_index, api_key in self.api_keys:
             results.append(f"KEY_{key_index}:")
             for label, model in checks:
                 if not model:
@@ -296,11 +298,11 @@ class OpenRouterProvider(AIProvider):
         _log_key_status_result(key_index, model, status)
         return status
 
-    async def _chat_completion(self, payload: dict, models: list[str]) -> str:
+    async def _chat_completion(self, payload: dict, models: list[str], operation: str) -> str:
         data = await self._completion_data(
             payload,
             models,
-            operation="chat",
+            operation=operation,
             validator=_has_text_content,
         )
         if data is None:
@@ -326,117 +328,121 @@ class OpenRouterProvider(AIProvider):
     ) -> Any | None:
         attempted = 0
         skipped = 0
-        for model_index, model in enumerate(models, start=1):
+        combinations = self._completion_combinations(models, operation)
+        for model_index, model, key_index, api_key in combinations:
             model_payload = {**payload, "model": model}
-            for key_index, api_key in enumerate(self.api_keys, start=1):
-                if self._is_key_on_cooldown(key_index):
-                    skipped += 1
-                    logger.info(
-                        "OpenRouter operation=%s model=%s model_index=%s KEY_%s skipped by temporary cooldown",
-                        operation,
-                        model,
-                        model_index,
-                        key_index,
-                    )
-                    continue
+            if self._is_key_on_cooldown(key_index, operation):
+                skipped += 1
+                logger.info(
+                    "OpenRouter operation=%s model=%s model_index=%s KEY_%s skipped by temporary cooldown",
+                    operation,
+                    model,
+                    model_index,
+                    key_index,
+                )
+                continue
 
-                attempted += 1
-                headers = {
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                    "X-Title": self.app_name,
-                }
+            attempted += 1
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "X-Title": self.app_name,
+            }
 
-                try:
-                    timeout = aiohttp.ClientTimeout(total=35)
-                    async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-                        async with session.post(OPENROUTER_CHAT_URL, json=model_payload) as response:
-                            data = await _response_data(response)
-                            if response.status >= 400:
-                                rate_headers = _rate_limit_headers(response)
-                                reason = _rotation_reason(response.status, data, rate_headers)
-                                logger.warning(
-                                    "KEY_%s model=%s failed status=%s reason=%s operation=%s rate=%s",
-                                    key_index,
-                                    model,
-                                    response.status,
-                                    reason,
-                                    operation,
-                                    rate_headers,
-                                )
-                                if _should_skip_key(response.status, data, rate_headers):
-                                    self._cooldown_key(key_index, reason)
-                                if not _should_try_next_combination(response.status, data, rate_headers):
-                                    reason = f"non-retryable {reason}"
-                                _log_next_rotation(
-                                    model=model,
-                                    model_index=model_index,
-                                    models=models,
-                                    key_index=key_index,
-                                    keys_count=len(self.api_keys),
-                                    reason=reason,
-                                )
-                                continue
-                except aiohttp.ClientError as exc:
-                    logger.exception(
-                        "KEY_%s model=%s failed status=request_failed reason=%s operation=%s",
-                        key_index,
-                        model,
-                        exc,
-                        operation,
-                    )
-                    continue
-                except TimeoutError as exc:
-                    reason = "timeout"
-                    self._cooldown_key(key_index, reason, seconds=TIMEOUT_COOLDOWN_SECONDS)
-                    logger.warning(
-                        "KEY_%s model=%s failed status=timeout reason=%s operation=%s",
-                        key_index,
-                        model,
-                        exc,
-                        operation,
-                    )
-                    _log_next_rotation(
-                        model=model,
-                        model_index=model_index,
-                        models=models,
-                        key_index=key_index,
-                        keys_count=len(self.api_keys),
-                        reason=reason,
-                    )
-                    continue
-                except Exception as exc:
-                    logger.exception(
-                        "OpenRouter operation=%s model=%s model_index=%s KEY_%s unexpected failure: %s",
-                        operation,
-                        model,
-                        model_index,
-                        key_index,
-                        exc,
-                    )
-                    continue
+            try:
+                timeout = aiohttp.ClientTimeout(total=35)
+                async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+                    async with session.post(OPENROUTER_CHAT_URL, json=model_payload) as response:
+                        data = await _response_data(response)
+                        if response.status >= 400:
+                            rate_headers = _rate_limit_headers(response)
+                            reason = _rotation_reason(response.status, data, rate_headers)
+                            logger.warning(
+                                "KEY_%s model=%s failed status=%s reason=%s operation=%s rate=%s",
+                                key_index,
+                                model,
+                                response.status,
+                                reason,
+                                operation,
+                                rate_headers,
+                            )
+                            if _should_skip_key(response.status, data, rate_headers):
+                                self._cooldown_key(key_index, reason, operation)
+                            if not _should_try_next_combination(response.status, data, rate_headers):
+                                reason = f"non-retryable {reason}"
+                            _log_next_rotation(
+                                model=model,
+                                model_index=model_index,
+                                models=models,
+                                key_index=key_index,
+                                keys_count=len(self.api_keys),
+                                reason=reason,
+                            )
+                            continue
+            except aiohttp.ClientError as exc:
+                reason = "request failed"
+                if operation != "vision":
+                    self._cooldown_key(key_index, reason, operation, seconds=TIMEOUT_COOLDOWN_SECONDS)
+                logger.exception(
+                    "KEY_%s model=%s failed status=request_failed reason=%s operation=%s",
+                    key_index,
+                    model,
+                    exc,
+                    operation,
+                )
+                continue
+            except TimeoutError as exc:
+                reason = "timeout"
+                if operation != "vision":
+                    self._cooldown_key(key_index, reason, operation, seconds=TIMEOUT_COOLDOWN_SECONDS)
+                logger.warning(
+                    "KEY_%s model=%s failed status=timeout reason=%s operation=%s",
+                    key_index,
+                    model,
+                    exc,
+                    operation,
+                )
+                _log_next_rotation(
+                    model=model,
+                    model_index=model_index,
+                    models=models,
+                    key_index=key_index,
+                    keys_count=len(self.api_keys),
+                    reason=reason,
+                )
+                continue
+            except Exception as exc:
+                logger.exception(
+                    "OpenRouter operation=%s model=%s model_index=%s KEY_%s unexpected failure: %s",
+                    operation,
+                    model,
+                    model_index,
+                    key_index,
+                    exc,
+                )
+                continue
 
-                if validator is not None and not validator(data):
-                    logger.warning(
-                        "OpenRouter operation=%s model=%s model_index=%s KEY_%s invalid response: %s",
-                        operation,
-                        model,
-                        model_index,
-                        key_index,
-                        data,
-                    )
-                    _log_next_rotation(
-                        model=model,
-                        model_index=model_index,
-                        models=models,
-                        key_index=key_index,
-                        keys_count=len(self.api_keys),
-                        reason="invalid response",
-                    )
-                    continue
+            if validator is not None and not validator(data):
+                logger.warning(
+                    "OpenRouter operation=%s model=%s model_index=%s KEY_%s invalid response: %s",
+                    operation,
+                    model,
+                    model_index,
+                    key_index,
+                    data,
+                )
+                _log_next_rotation(
+                    model=model,
+                    model_index=model_index,
+                    models=models,
+                    key_index=key_index,
+                    keys_count=len(self.api_keys),
+                    reason="invalid response",
+                )
+                continue
 
-                logger.info("KEY_%s model=%s success status=OK operation=%s", key_index, model, operation)
-                return data
+            logger.info("KEY_%s model=%s success status=OK operation=%s", key_index, model, operation)
+            return data
 
         logger.error(
             "all_openrouter_fallbacks_failed operation=%s models=%s attempted=%s cooldown_skipped=%s",
@@ -447,27 +453,56 @@ class OpenRouterProvider(AIProvider):
         )
         return None
 
-    def _is_key_on_cooldown(self, key_index: int) -> bool:
-        until = self._key_cooldowns.get(key_index)
-        if not until:
+    def _completion_combinations(self, models: list[str], operation: str) -> list[tuple[int, str, int, str]]:
+        ordered_keys = self._ordered_keys(operation)
+        combinations: list[tuple[int, str, int, str]] = []
+        if operation == "vision":
+            for key_index, api_key in ordered_keys:
+                for model_index, model in enumerate(models, start=1):
+                    combinations.append((model_index, model, key_index, api_key))
+            return combinations
+
+        for model_index, model in enumerate(models, start=1):
+            for key_index, api_key in ordered_keys:
+                combinations.append((model_index, model, key_index, api_key))
+        return combinations
+
+    def _ordered_keys(self, operation: str) -> list[tuple[int, str]]:
+        priority = VISION_KEY_PRIORITY if operation == "vision" else CHAT_KEY_PRIORITY
+        by_index = dict(self.api_keys)
+        ordered = [(index, by_index[index]) for index in priority if index in by_index]
+        ordered.extend((index, key) for index, key in self.api_keys if index not in priority)
+        return ordered
+
+    def _is_key_on_cooldown(self, key_index: int, operation: str) -> bool:
+        cooldown = self._key_cooldowns.get((operation, key_index))
+        if not cooldown:
             return False
+        until, _ = cooldown
         if until <= time.monotonic():
-            self._key_cooldowns.pop(key_index, None)
+            self._key_cooldowns.pop((operation, key_index), None)
             return False
         return True
 
-    def _cooldown_key(self, key_index: int, reason: str, seconds: int = KEY_COOLDOWN_SECONDS) -> None:
-        self._key_cooldowns[key_index] = time.monotonic() + seconds
+    def _cooldown_key(
+        self,
+        key_index: int,
+        reason: str,
+        operation: str,
+        seconds: int = KEY_COOLDOWN_SECONDS,
+    ) -> None:
+        self._key_cooldowns[(operation, key_index)] = (time.monotonic() + seconds, reason)
         logger.warning(
-            "OpenRouter KEY_%s temporarily skipped for %ss because of %s",
+            "OpenRouter KEY_%s operation=%s temporarily skipped for %ss because of %s",
             key_index,
+            operation,
             seconds,
             reason,
         )
 
 
 def build_ai_provider(settings: Settings) -> AIProvider:
-    api_keys = settings.openrouter_api_keys
+    api_keys = settings.openrouter_api_key_slots
 
     if api_keys:
         return OpenRouterProvider(
@@ -479,6 +514,19 @@ def build_ai_provider(settings: Settings) -> AIProvider:
         )
 
     return NullAIProvider()
+
+
+def _normalize_key_slots(api_keys: list[str] | list[tuple[int, str]]) -> list[tuple[int, str]]:
+    slots: list[tuple[int, str]] = []
+    for fallback_index, item in enumerate(api_keys, start=1):
+        if isinstance(item, tuple):
+            key_index, key = item
+        else:
+            key_index, key = fallback_index, item
+        key = key.strip()
+        if key:
+            slots.append((int(key_index), key))
+    return slots
 
 
 def _should_try_next_combination(

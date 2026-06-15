@@ -20,6 +20,7 @@ from app.services.meta_engine import (
     CodmunityClient,
     MetaEngineError,
     MetaWeapon,
+    _is_absolute_meta_heading,
     check_loadout_answer,
     find_selected_weapon,
     format_meta_list,
@@ -216,6 +217,10 @@ class MetaSelectionTest(unittest.TestCase):
         weapons = client._get_meta_with_fallback("codmunity", "wzstats", "br_ranked", 6)
 
         self.assertEqual(weapons[0].source, "WZStatsGG fallback")
+
+    def test_codmunity_ranked_absolute_meta_heading_is_accepted(self):
+        self.assertTrue(_is_absolute_meta_heading("Absolute Meta", "br_ranked"))
+        self.assertTrue(_is_absolute_meta_heading("Absolute Meta", "resurgence_ranked"))
 
 
 if __name__ == "__main__":

@@ -64,24 +64,28 @@ class Settings(BaseSettings):
 
     @property
     def openrouter_api_keys(self) -> list[str]:
+        return [key for _, key in self.openrouter_api_key_slots]
+
+    @property
+    def openrouter_api_key_slots(self) -> list[tuple[int, str]]:
         keys = [
-            self.openrouter_api_key_1,
-            self.openrouter_api_key_2,
-            self.openrouter_api_key_3,
-            self.openrouter_api_key_4,
-            self.openrouter_api_key_5,
+            (1, self.openrouter_api_key_1),
+            (2, self.openrouter_api_key_2),
+            (3, self.openrouter_api_key_3),
+            (4, self.openrouter_api_key_4),
+            (5, self.openrouter_api_key_5),
         ]
-        clean_keys: list[str] = []
+        clean_slots: list[tuple[int, str]] = []
         seen: set[str] = set()
-        for key in keys:
+        for index, key in keys:
             if not key:
                 continue
             key = key.strip()
             if not key or key in seen:
                 continue
             seen.add(key)
-            clean_keys.append(key)
-        return clean_keys
+            clean_slots.append((index, key))
+        return clean_slots
 
     @property
     def openrouter_models(self) -> list[str]:

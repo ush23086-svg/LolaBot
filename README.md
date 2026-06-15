@@ -14,7 +14,7 @@ LolaBot - Telegram uchun o'zbekcha yordamchi bot. Bot `aiogram` bilan ishlaydi, 
 - Default model: `google/gemma-4-31b-it:free`.
 - Warzone/MW3 meta javoblari CODMunity parser + WZStatsGG fallback + chat state orqali beriladi.
 - `MAIN_GROUP_ID` berilsa, asosiy guruh bot javob limitidan ozod bo'ladi.
-- Telegram Stars orqali premium: 1 kun test 29 Stars, 1 oy premium 399 Stars.
+- Telegram Stars orqali premium: 1 kun test 29 Stars, 1 oy premium 250 Stars.
 - Guruhlarda xabar statistikasi: `/stats`, `/week`, `/month`.
 - Har kuni 08:00 da guruhlarga kechagi daily report yuboradi.
 - CODMunity yoki WZStatsGG'dan weapon name, type, pick rate, code va attachmentlar olinadi.
@@ -77,7 +77,7 @@ Telegram Stars tariflari:
 
 ```text
 1 kun test: 29 Stars
-1 oy premium: 399 Stars
+1 oy premium: 250 Stars
 ```
 
 `/premium` private chatda tariflarni ko'rsatadi. To'lov `currency=XTR` orqali yuboriladi. `successful_payment` kelganda `users` va `payments` jadvallariga yoziladi.
