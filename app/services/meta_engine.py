@@ -200,17 +200,28 @@ class CodmunityClient:
         return self.get_br_ranked_meta(limit)
 
     def get_br_ranked_meta(self, limit: int = 6) -> list[MetaWeapon]:
-        return self._get_wzstats_meta(WZSTATS_RANKED_META_URL, game="br_ranked", limit=limit)
+        return self._get_meta_with_fallback(
+            codmunity_url=RANKED_META_URL,
+            wzstats_url=WZSTATS_RANKED_META_URL,
+            game="br_ranked",
+            limit=limit,
+        )
 
     def get_resurgence_ranked_meta(self, limit: int = 6) -> list[MetaWeapon]:
-        return self._get_wzstats_meta(
-            WZSTATS_RESURGENCE_RANKED_META_URL,
+        return self._get_meta_with_fallback(
+            codmunity_url=RANKED_META_URL,
+            wzstats_url=WZSTATS_RESURGENCE_RANKED_META_URL,
             game="resurgence_ranked",
             limit=limit,
         )
 
     def get_resurgence_meta(self, limit: int = 6) -> list[MetaWeapon]:
-        return self._get_wzstats_meta(WZSTATS_RESURGENCE_META_URL, game="resurgence", limit=limit)
+        return self._get_meta_with_fallback(
+            codmunity_url=WARZONE_META_URL,
+            wzstats_url=WZSTATS_RESURGENCE_META_URL,
+            game="resurgence",
+            limit=limit,
+        )
 
     def get_battle_royale_meta(self, limit: int = 6) -> list[MetaWeapon]:
         return self.get_warzone_meta(limit)
@@ -253,14 +264,19 @@ class CodmunityClient:
         limit: int,
     ) -> list[MetaWeapon]:
         try:
-            return self._get_codmunity_meta(codmunity_url, game=game, limit=limit)
+            weapons = self._get_codmunity_meta(codmunity_url, game=game, limit=limit)
+            logger.info("source_attempt=CODMunity success mode=%s parsed_weapons=%s", game, len(weapons))
+            return weapons
         except MetaEngineError as exc:
-            logger.warning("CODMunity %s meta failed, trying WZStatsGG: %s", game, exc)
+            logger.warning("source_attempt=CODMunity fail mode=%s reason=%s", game, exc)
 
         try:
-            return self._get_wzstats_meta(wzstats_url, game=game, limit=limit)
+            weapons = self._get_wzstats_meta(wzstats_url, game=game, limit=limit)
+            _mark_fallback_source(weapons)
+            logger.info("source_attempt=WZStatsGG fallback success mode=%s parsed_weapons=%s", game, len(weapons))
+            return weapons
         except MetaEngineError as exc:
-            logger.warning("WZStatsGG %s meta failed: %s", game, exc)
+            logger.warning("source_attempt=WZStatsGG fallback fail mode=%s reason=%s", game, exc)
             raise MetaEngineError(META_NOT_FOUND_MESSAGE) from exc
 
     def _get_codmunity_meta(self, url: str, game: str, limit: int) -> list[MetaWeapon]:
@@ -331,6 +347,12 @@ def get_br_ranked_meta(limit: int = 6, timeout: int = 15) -> list[dict]:
 
 def get_resurgence_ranked_meta(limit: int = 6, timeout: int = 15) -> list[dict]:
     return [weapon.to_dict() for weapon in CodmunityClient(timeout).get_resurgence_ranked_meta(limit)]
+
+
+def _mark_fallback_source(weapons: list[MetaWeapon]) -> None:
+    for weapon in weapons:
+        if weapon.source == "WZStatsGG":
+            weapon.source = "WZStatsGG fallback"
 
 
 def find_selected_weapon(text: str, weapons: Iterable[dict | MetaWeapon]) -> MetaWeapon | None:
@@ -837,8 +859,17 @@ def _is_absolute_meta_heading(line: str, game: str) -> bool:
     normalized = normalize_text(line)
     if game == "warzone":
         game_aliases = {"warzone"}
-    elif game == "ranked":
+    elif game in {"ranked", "br_ranked"}:
         game_aliases = {"ranked", "warzoneranked"}
+        return (
+            normalized.endswith("absolutemeta")
+            and any(alias in normalized for alias in game_aliases)
+            and "resurgence" not in normalized
+        )
+    elif game == "resurgence_ranked":
+        return normalized.endswith("absolutemeta") and "resurgence" in normalized and "ranked" in normalized
+    elif game == "resurgence":
+        game_aliases = {"resurgence"}
     else:
         game_aliases = {"mw3", "mw4"}
     return normalized.endswith("absolutemeta") and any(alias in normalized for alias in game_aliases)

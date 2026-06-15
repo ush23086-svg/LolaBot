@@ -11,7 +11,7 @@ from aiogram.types import Message, TelegramObject
 from app.services.stats_service import StatsService
 
 logger = logging.getLogger(__name__)
-ADMIN_COMMANDS = {"/grant", "/revoke", "/check", "/users", "/paid", "/income"}
+ADMIN_COMMANDS = {"/grant", "/revoke", "/check", "/users", "/paid", "/income", "/keys_status"}
 
 
 class StatsMiddleware(BaseMiddleware):

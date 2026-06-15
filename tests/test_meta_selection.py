@@ -16,6 +16,8 @@ from app.handlers.common import (
 from app.services.meta_engine import (
     CHECKER_FAIL_MESSAGE,
     LOADOUT_NOT_FOUND_MESSAGE,
+    META_NOT_FOUND_MESSAGE,
+    CodmunityClient,
     MetaEngineError,
     MetaWeapon,
     check_loadout_answer,
@@ -178,6 +180,42 @@ class MetaSelectionTest(unittest.TestCase):
         self.assertTrue(_should_handle_meta_list("BR Ranked meta", requested_game("BR Ranked meta")))
         self.assertTrue(_should_handle_meta_list("BR Ranked uchun qurol ber", requested_game("BR Ranked uchun qurol ber")))
         self.assertTrue(_should_handle_meta_list("Ranked", requested_game("Ranked")))
+
+    def test_codmunity_success_skips_wzstats_fallback(self):
+        client = object.__new__(CodmunityClient)
+        codmunity_weapon = MetaWeapon("AK-27", "Long Range", "", game="br_ranked", source="CODMunity")
+        calls = {"wzstats": 0}
+
+        def codmunity_meta(url, game, limit):
+            return [codmunity_weapon]
+
+        def wzstats_meta(url, game, limit):
+            calls["wzstats"] += 1
+            raise AssertionError("WZStats should not be called")
+
+        client._get_codmunity_meta = codmunity_meta
+        client._get_wzstats_meta = wzstats_meta
+
+        weapons = client._get_meta_with_fallback("codmunity", "wzstats", "br_ranked", 6)
+
+        self.assertEqual(weapons[0].source, "CODMunity")
+        self.assertEqual(calls["wzstats"], 0)
+
+    def test_codmunity_fail_uses_wzstats_fallback_source(self):
+        client = object.__new__(CodmunityClient)
+
+        def codmunity_meta(url, game, limit):
+            raise MetaEngineError(META_NOT_FOUND_MESSAGE)
+
+        def wzstats_meta(url, game, limit):
+            return [MetaWeapon("Carbon 57", "Close Range", "", game=game, source="WZStatsGG")]
+
+        client._get_codmunity_meta = codmunity_meta
+        client._get_wzstats_meta = wzstats_meta
+
+        weapons = client._get_meta_with_fallback("codmunity", "wzstats", "br_ranked", 6)
+
+        self.assertEqual(weapons[0].source, "WZStatsGG fallback")
 
 
 if __name__ == "__main__":

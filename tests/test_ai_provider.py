@@ -1,0 +1,105 @@
+import unittest
+
+from app.services import ai_provider as provider_module
+from app.services.ai_provider import OpenRouterProvider
+
+
+class FakeResponse:
+    def __init__(self, status, data, headers=None):
+        self.status = status
+        self._data = data
+        self.headers = headers or {}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def json(self, content_type=None):
+        return self._data
+
+    async def text(self):
+        return str(self._data)
+
+
+class FakeSession:
+    responses = []
+    attempts = []
+
+    def __init__(self, headers=None, timeout=None):
+        self.headers = headers or {}
+        self.timeout = timeout
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    def post(self, url, json):
+        FakeSession.attempts.append(
+            {
+                "authorization": self.headers.get("Authorization", ""),
+                "model": json.get("model"),
+                "content": json.get("messages", [{}])[-1].get("content"),
+            }
+        )
+        if not FakeSession.responses:
+            raise AssertionError("No fake response queued")
+        return FakeSession.responses.pop(0)
+
+
+class OpenRouterProviderTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.original_session = provider_module.aiohttp.ClientSession
+        provider_module.aiohttp.ClientSession = FakeSession
+        FakeSession.responses = []
+        FakeSession.attempts = []
+
+    def tearDown(self):
+        provider_module.aiohttp.ClientSession = self.original_session
+
+    async def test_429_rotates_to_next_key(self):
+        FakeSession.responses = [
+            FakeResponse(429, {"error": "free-models-per-day"}, {"X-RateLimit-Remaining": "0"}),
+            FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]}),
+        ]
+        provider = OpenRouterProvider(
+            api_keys=["secret-key-1", "secret-key-2"],
+            models=["free-model"],
+            vision_models=[],
+            image_models=[],
+            app_name="Lola",
+        )
+
+        answer = await provider.ask_ai("hi", "Tester")
+
+        self.assertEqual(answer, "ok")
+        self.assertEqual(len(FakeSession.attempts), 2)
+        self.assertEqual(FakeSession.attempts[0]["authorization"], "Bearer secret-key-1")
+        self.assertEqual(FakeSession.attempts[1]["authorization"], "Bearer secret-key-2")
+
+    async def test_keys_status_masks_real_keys(self):
+        FakeSession.responses = [
+            FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]}),
+            FakeResponse(429, {"error": "rate limit"}, {"X-RateLimit-Remaining": "0"}),
+        ]
+        provider = OpenRouterProvider(
+            api_keys=["secret-key-1", "secret-key-2"],
+            models=["free-model"],
+            vision_models=[],
+            image_models=[],
+            app_name="Lola",
+        )
+
+        rows = await provider.keys_status()
+        text = "\n".join(rows)
+
+        self.assertIn("KEY_1: OK", text)
+        self.assertIn("KEY_2: 429 rate limit", text)
+        self.assertNotIn("secret-key", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

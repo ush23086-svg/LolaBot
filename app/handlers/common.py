@@ -239,7 +239,7 @@ def _reply_meta_weapons(message: Message) -> list[dict]:
 
 
 def _inferred_loadout_url(name: str, source: str) -> str | None:
-    if source != "WZStatsGG":
+    if not source.startswith("WZStatsGG"):
         return None
 
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
@@ -792,6 +792,21 @@ async def check_handler(message: Message, stats_service: StatsService, settings:
     )
 
 
+@router.message(Command("keys_status"))
+async def keys_status_handler(
+    message: Message,
+    ai_provider: AIProvider,
+    settings: Settings,
+) -> None:
+    if not _is_owner(message, settings):
+        return
+    if message.chat.type != "private":
+        return
+
+    rows = await ai_provider.keys_status()
+    await message.reply("\n".join(rows))
+
+
 @router.message(Command("image"))
 async def image_command_handler(
     message: Message,
@@ -926,6 +941,11 @@ async def text_handler(
         await _save_memory(message, stats_service, text, "Ranked meta ro'yxati so'raldi.")
         return
 
+    if _should_handle_meta_list(text, game_choice):
+        await _handle_meta_request(message, text, chat_data, codmunity_client)
+        await _save_memory(message, stats_service, text, "Meta turi so'raldi.")
+        return
+
     if selected_weapon:
         logger.info(
             "selected weapon from context chat=%s user=%s weapon=%s source=%s",
@@ -940,11 +960,6 @@ async def text_handler(
 
     if last_meta and _selection_is_out_of_range(text, last_meta):
         await message.reply("Ro'yxatda bunaqa raqam yo'q")
-        return
-
-    if _should_handle_meta_list(text, game_choice):
-        await _handle_meta_request(message, text, chat_data, codmunity_client)
-        await _save_memory(message, stats_service, text, "Meta turi so'raldi.")
         return
 
     if is_loadout_request(text):
@@ -962,7 +977,7 @@ async def text_handler(
         await _save_memory(message, stats_service, text, answer)
     except Exception:
         logger.exception("Text handling failed")
-        await message.reply("Hozir javob berishda muammo bo'ldi. Birozdan keyin urinib ko'ring.")
+        await message.reply("AI modeli vaqtincha band yoki limitga tushgan. Keyinroq urinib ko'ring.")
 
 
 async def _handle_meta_request(

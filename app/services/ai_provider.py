@@ -14,11 +14,12 @@ from app.config import Settings
 logger = logging.getLogger(__name__)
 
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
-AI_ERROR_MESSAGE = "Hozir javob berishda muammo bo'ldi. Keyinroq urinib ko'ring."
+AI_ERROR_MESSAGE = "AI modeli vaqtincha band yoki limitga tushgan. Keyinroq urinib ko'ring."
 IMAGE_ERROR_MESSAGE = "Rasmni ko'rish modeli ulanmagan. OPENROUTER_VISION_MODEL_1 qo'shing."
 IMAGE_GENERATION_ERROR_MESSAGE = "Rasm yaratishda muammo bo'ldi. Keyinroq urinib ko'ring."
 KEY_COOLDOWN_SECONDS = 10 * 60
 TIMEOUT_COOLDOWN_SECONDS = 2 * 60
+KEY_STATUS_TIMEOUT_SECONDS = 8
 
 SYSTEM_PROMPT = """
 Sen Lola ismli Telegram botisan.
@@ -85,6 +86,10 @@ class AIProvider(ABC):
     async def generate_image(self, prompt: str, user_name: str) -> GeneratedImage:
         raise NotImplementedError
 
+    @abstractmethod
+    async def keys_status(self) -> list[str]:
+        raise NotImplementedError
+
 
 class NullAIProvider(AIProvider):
     async def ask_ai(self, text: str, user_name: str, reply_context: str = "") -> str:
@@ -101,6 +106,9 @@ class NullAIProvider(AIProvider):
 
     async def generate_image(self, prompt: str, user_name: str) -> GeneratedImage:
         return GeneratedImage(error=IMAGE_GENERATION_ERROR_MESSAGE)
+
+    async def keys_status(self) -> list[str]:
+        return ["KEY_1: not configured"]
 
 
 class OpenRouterProvider(AIProvider):
@@ -221,6 +229,49 @@ class OpenRouterProvider(AIProvider):
 
         return image
 
+    async def keys_status(self) -> list[str]:
+        if not self.api_keys:
+            return ["KEY_1: not configured"]
+
+        model = self.models[0] if self.models else "google/gemma-4-31b-it:free"
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": "hi"}],
+            "temperature": 0,
+            "max_tokens": 5,
+        }
+        results: list[str] = []
+        for key_index, api_key in enumerate(self.api_keys, start=1):
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "X-Title": self.app_name,
+            }
+            try:
+                timeout = aiohttp.ClientTimeout(total=KEY_STATUS_TIMEOUT_SECONDS)
+                async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+                    async with session.post(OPENROUTER_CHAT_URL, json=payload) as response:
+                        data = await _response_data(response)
+                        rate_headers = _rate_limit_headers(response)
+                        status = _key_status_label(response.status, data, rate_headers)
+            except TimeoutError:
+                status = "timeout"
+            except aiohttp.ClientError as exc:
+                status = "request failed"
+                logger.warning("KEY_%s model=%s status=request failed reason=%s", key_index, model, exc)
+            except Exception as exc:
+                status = "unexpected error"
+                logger.warning("KEY_%s model=%s status=unexpected error reason=%s", key_index, model, exc)
+
+            log_status, reason = _split_key_status(status)
+            if reason:
+                logger.info("KEY_%s model=%s status=%s reason=%s", key_index, model, log_status, reason)
+            else:
+                logger.info("KEY_%s model=%s status=%s", key_index, model, log_status)
+            results.append(f"KEY_{key_index}: {status}")
+
+        return results
+
     async def _chat_completion(self, payload: dict, models: list[str]) -> str:
         data = await self._completion_data(
             payload,
@@ -279,17 +330,16 @@ class OpenRouterProvider(AIProvider):
                             data = await _response_data(response)
                             if response.status >= 400:
                                 rate_headers = _rate_limit_headers(response)
-                                logger.warning(
-                                    "OpenRouter operation=%s model=%s model_index=%s KEY_%s status=%s rate=%s error=%s",
-                                    operation,
-                                    model,
-                                    model_index,
-                                    key_index,
-                                    response.status,
-                                    rate_headers,
-                                    data,
-                                )
                                 reason = _rotation_reason(response.status, data, rate_headers)
+                                logger.warning(
+                                    "KEY_%s model=%s status=%s reason=%s operation=%s rate=%s",
+                                    key_index,
+                                    model,
+                                    response.status,
+                                    reason,
+                                    operation,
+                                    rate_headers,
+                                )
                                 if _should_skip_key(response.status, data, rate_headers):
                                     self._cooldown_key(key_index, reason)
                                 if not _should_try_next_combination(response.status, data, rate_headers):
@@ -305,24 +355,22 @@ class OpenRouterProvider(AIProvider):
                                 continue
                 except aiohttp.ClientError as exc:
                     logger.exception(
-                        "OpenRouter operation=%s model=%s model_index=%s KEY_%s request failed: %s",
-                        operation,
-                        model,
-                        model_index,
+                        "KEY_%s model=%s status=request_failed reason=%s operation=%s",
                         key_index,
+                        model,
                         exc,
+                        operation,
                     )
                     continue
                 except TimeoutError as exc:
                     reason = "timeout"
                     self._cooldown_key(key_index, reason, seconds=TIMEOUT_COOLDOWN_SECONDS)
                     logger.warning(
-                        "OpenRouter operation=%s model=%s model_index=%s KEY_%s timeout: %s",
-                        operation,
-                        model,
-                        model_index,
+                        "KEY_%s model=%s status=timeout reason=%s operation=%s",
                         key_index,
+                        model,
                         exc,
+                        operation,
                     )
                     _log_next_rotation(
                         model=model,
@@ -363,10 +411,11 @@ class OpenRouterProvider(AIProvider):
                     )
                     continue
 
+                logger.info("KEY_%s model=%s status=OK operation=%s", key_index, model, operation)
                 return data
 
         logger.error(
-            "OpenRouter operation=%s failed for all available keys and models: models=%s attempted=%s cooldown_skipped=%s",
+            "all_openrouter_fallbacks_failed operation=%s models=%s attempted=%s cooldown_skipped=%s",
             operation,
             models,
             attempted,
@@ -474,11 +523,40 @@ def _rate_limit_headers(response: aiohttp.ClientResponse) -> dict[str, str]:
     }
 
 
+def _key_status_label(status: int, data: Any, rate_headers: dict[str, str]) -> str:
+    if status < 400:
+        return "OK"
+
+    reason = _rotation_reason(status, data, rate_headers)
+    if status == 401:
+        return "401 invalid"
+    if status == 402:
+        return "402 insufficient credits"
+    if status == 403:
+        return "403 forbidden"
+    if status == 429:
+        return "429 rate limit"
+    if status == 404:
+        return "404 no endpoints" if reason == "no endpoints found" else "404 not found"
+    return f"{status} {reason}"
+
+
+def _split_key_status(status: str) -> tuple[str, str]:
+    if status == "OK" or " " not in status:
+        return status, ""
+    code, _, reason = status.partition(" ")
+    return code, reason
+
+
 def _rotation_reason(status: int, data: Any, rate_headers: dict[str, str]) -> str:
     text = str(data).lower()
     remaining = rate_headers.get("X-RateLimit-Remaining")
     if "free-models-per-day" in text:
         return "free-models-per-day"
+    if "no endpoints found" in text:
+        return "no endpoints found"
+    if "temporarily unavailable" in text:
+        return "temporarily unavailable"
     if status == 429 or remaining == "0":
         return "rate limit"
     for phrase in (
