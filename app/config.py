@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     openrouter_model_2: str | None = Field(default=None, alias="OPENROUTER_MODEL_2")
     openrouter_model_3: str | None = Field(default=None, alias="OPENROUTER_MODEL_3")
     openrouter_vision_model_1: str | None = Field(
-        default=None,
+        default="nex-agi/nex-n2-pro:free",
         alias="OPENROUTER_VISION_MODEL_1",
     )
     openrouter_vision_model_2: str | None = Field(
