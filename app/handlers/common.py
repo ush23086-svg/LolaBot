@@ -142,7 +142,13 @@ async def _should_answer(message: Message, bot: Bot) -> bool:
 
 async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -> bool:
     if message.chat.type == "private":
-        _log_media_decision(message, is_reply_to_bot=False, mentioned_bot=False, allowed=True)
+        _log_media_decision(
+            message,
+            is_main_group=False,
+            is_reply_to_bot=False,
+            mentioned_bot=False,
+            allowed=True,
+        )
         return True
 
     me = await bot.me()
@@ -160,6 +166,7 @@ async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -
 
     _log_media_decision(
         message,
+        is_main_group=is_main_group,
         is_reply_to_bot=is_reply_to_bot,
         mentioned_bot=mentioned_bot,
         allowed=allowed,
@@ -170,18 +177,20 @@ async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -
 def _log_media_decision(
     message: Message,
     *,
+    is_main_group: bool,
     is_reply_to_bot: bool,
     mentioned_bot: bool,
     allowed: bool,
 ) -> None:
     logger.info(
         "media_handler_decision chat_type=%s chat_id=%s has_photo=%s has_document=%s caption=%r "
-        "is_reply_to_bot=%s mentioned_bot=%s allowed_in_group=%s",
+        "is_main_group=%s is_reply_to_bot=%s mentioned_bot=%s allowed_in_group=%s",
         message.chat.type,
         message.chat.id,
         bool(message.photo),
         bool(message.document),
         (message.caption or "")[:300],
+        is_main_group,
         is_reply_to_bot,
         mentioned_bot,
         allowed,
