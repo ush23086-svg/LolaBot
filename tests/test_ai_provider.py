@@ -111,6 +111,24 @@ class OpenRouterProviderTest(unittest.IsolatedAsyncioTestCase):
             ["Bearer secret-key-1", "Bearer secret-key-3", "Bearer secret-key-2"],
         )
 
+    async def test_reasoning_request_uses_reasoning_model(self):
+        FakeSession.responses = [
+            FakeResponse(200, {"choices": [{"message": {"content": "4"}}]}),
+        ]
+        provider = OpenRouterProvider(
+            api_keys=[(1, "secret-key-1")],
+            models=["chat-model", "fallback-model"],
+            vision_models=[],
+            image_models=[],
+            reasoning_models=["reasoning-model", "fallback-model"],
+            app_name="Lola",
+        )
+
+        answer = await provider.ask_ai("2+2 nechchi?", "Tester")
+
+        self.assertEqual(answer, "4")
+        self.assertEqual(FakeSession.attempts[0]["model"], "reasoning-model")
+
     async def test_vision_falls_back_to_second_model_before_next_key(self):
         FakeSession.responses = [
             TimeoutError("slow vision model"),

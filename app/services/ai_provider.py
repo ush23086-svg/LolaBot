@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 AI_ERROR_MESSAGE = "AI modeli vaqtincha band yoki limitga tushgan. Keyinroq urinib ko'ring."
-IMAGE_ERROR_MESSAGE = "Rasmni ko'rish modeli ulanmagan. OPENROUTER_VISION_MODEL_1 qo'shing."
+IMAGE_ERROR_MESSAGE = "Rasmni ko'rish modeli ulanmagan. VISION_MODEL qo'shing."
 IMAGE_GENERATION_ERROR_MESSAGE = "Rasm yaratishda muammo bo'ldi. Keyinroq urinib ko'ring."
 KEY_COOLDOWN_SECONDS = 10 * 60
 TIMEOUT_COOLDOWN_SECONDS = 2 * 60
@@ -131,11 +132,13 @@ class OpenRouterProvider(AIProvider):
         vision_models: list[str],
         image_models: list[str],
         app_name: str,
+        reasoning_models: list[str] | None = None,
     ) -> None:
         self.api_keys = _normalize_key_slots(api_keys)
         self.models = models
         self.vision_models = vision_models
         self.image_models = image_models
+        self.reasoning_models = reasoning_models or []
         self.app_name = app_name
         self._key_cooldowns: dict[tuple[str, int], tuple[float, str]] = {}
 
@@ -155,6 +158,12 @@ class OpenRouterProvider(AIProvider):
             "temperature": 0.6,
             "max_tokens": 700,
         }
+        if _is_reasoning_request(text):
+            return await self._chat_completion(
+                payload,
+                self.reasoning_models or self.models,
+                operation="reasoning",
+            )
         return await self._chat_completion(payload, self.models, operation="chat")
 
     async def analyze_image(
@@ -291,6 +300,10 @@ class OpenRouterProvider(AIProvider):
         for index, model in enumerate(self.models[1:], start=1):
             label = "fallback model" if index == 1 else f"fallback model {index}"
             checks.append((label, model))
+
+        reasoning_model = self.reasoning_models[0] if self.reasoning_models else None
+        if reasoning_model:
+            checks.append(("reasoning model", reasoning_model))
 
         return checks
 
@@ -585,6 +598,7 @@ def build_ai_provider(settings: Settings) -> AIProvider:
             models=settings.openrouter_models,
             vision_models=settings.openrouter_vision_models,
             image_models=settings.image_models,
+            reasoning_models=settings.openrouter_reasoning_models,
             app_name=settings.bot_name,
         )
 
@@ -602,6 +616,38 @@ def _normalize_key_slots(api_keys: list[str] | list[tuple[int, str]]) -> list[tu
         if key:
             slots.append((int(key_index), key))
     return slots
+
+
+def _is_reasoning_request(text: str) -> bool:
+    lowered = text.lower()
+    normalized = _normalize_for_reasoning(lowered)
+    if _has_math_expression(lowered):
+        return True
+    return any(
+        marker in normalized
+        for marker in (
+            "matematika",
+            "matematik",
+            "hisobla",
+            "hisobkitob",
+            "tenglama",
+            "formula",
+            "foiz",
+            "protsent",
+            "misolniyech",
+            "yechibber",
+            "mantiqiy",
+            "reasoning",
+        )
+    )
+
+
+def _normalize_for_reasoning(value: str) -> str:
+    return "".join(ch for ch in value if ch.isalnum())
+
+
+def _has_math_expression(value: str) -> bool:
+    return bool(re.search(r"\d+(?:\.\d+)?\s*[\+\-\*/x÷=^]\s*\d+", value))
 
 
 def _should_try_next_combination(
@@ -628,6 +674,8 @@ def _should_try_next_combination(
             "temporarily rate-limited",
             "temporarily rate limited",
             "temporarily unavailable",
+            "provider unavailable",
+            "api error",
             "free-models-per-day",
             "no endpoints found",
         )
@@ -715,6 +763,10 @@ def _rotation_reason(status: int, data: Any, rate_headers: dict[str, str]) -> st
         return "no endpoints found"
     if "temporarily unavailable" in text:
         return "temporarily unavailable"
+    if "provider unavailable" in text:
+        return "provider unavailable"
+    if "api error" in text:
+        return "api error"
     if status == 429 or remaining == "0":
         return "rate limit"
     for phrase in (

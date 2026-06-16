@@ -11,7 +11,18 @@ from aiogram.types import Message, TelegramObject
 from app.services.stats_service import StatsService
 
 logger = logging.getLogger(__name__)
-ADMIN_COMMANDS = {"/grant", "/revoke", "/check", "/users", "/paid", "/income", "/keys_status"}
+ADMIN_COMMANDS = {
+    "/grant",
+    "/revoke",
+    "/check",
+    "/users",
+    "/paid",
+    "/income",
+    "/keys_status",
+    "/vision_status",
+    "/chat_id",
+    "/debug_chat",
+}
 
 
 class StatsMiddleware(BaseMiddleware):
@@ -37,7 +48,8 @@ class StatsMiddleware(BaseMiddleware):
             return
 
         settings = data.get("settings")
-        command = (message.text or "").split(maxsplit=1)[0].split("@", 1)[0].lower()
+        text_parts = (message.text or "").split(maxsplit=1)
+        command = text_parts[0].split("@", 1)[0].lower() if text_parts else ""
         if command in ADMIN_COMMANDS and getattr(settings, "owner_id", None) == user.id:
             return
 

@@ -3,15 +3,17 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-OPENROUTER_DEFAULT_MODEL = "google/gemma-4-31b-it:free"
+OPENROUTER_DEFAULT_CHAT_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+OPENROUTER_DEFAULT_FALLBACK_MODEL = "google/gemma-3-27b-it:free"
+OPENROUTER_DEFAULT_VISION_MODEL = "nex-agi/nex-n2-pro:free"
+OPENROUTER_DEFAULT_MODEL = OPENROUTER_DEFAULT_CHAT_MODEL
 OPENROUTER_DEFAULT_IMAGE_MODELS = [
     "sourceful/riverflow-v2.5-pro:free",
     "sourceful/riverflow-v2.5-fast:free",
 ]
 OPENROUTER_LEGACY_MODEL_ALIASES = {
-    "google/gemma-3-27b-it:free": OPENROUTER_DEFAULT_MODEL,
-    "google/gemma-3n-e4b-it:free": OPENROUTER_DEFAULT_MODEL,
-    "meta-llama/llama-3.2-3b-instruct:free": OPENROUTER_DEFAULT_MODEL,
+    "google/gemma-3n-e4b-it:free": OPENROUTER_DEFAULT_CHAT_MODEL,
+    "meta-llama/llama-3.2-3b-instruct:free": OPENROUTER_DEFAULT_CHAT_MODEL,
 }
 
 
@@ -23,6 +25,10 @@ class Settings(BaseSettings):
     openrouter_api_key_3: str | None = Field(default=None, alias="OPENROUTER_API_KEY_3")
     openrouter_api_key_4: str | None = Field(default=None, alias="OPENROUTER_API_KEY_4")
     openrouter_api_key_5: str | None = Field(default=None, alias="OPENROUTER_API_KEY_5")
+    chat_model: str | None = Field(default=OPENROUTER_DEFAULT_CHAT_MODEL, alias="CHAT_MODEL")
+    fallback_model: str | None = Field(default=OPENROUTER_DEFAULT_FALLBACK_MODEL, alias="FALLBACK_MODEL")
+    vision_model: str | None = Field(default=OPENROUTER_DEFAULT_VISION_MODEL, alias="VISION_MODEL")
+    reasoning_model: str | None = Field(default=None, alias="REASONING_MODEL")
     openrouter_model: str = Field(
         default=OPENROUTER_DEFAULT_MODEL,
         alias="OPENROUTER_MODEL",
@@ -31,7 +37,7 @@ class Settings(BaseSettings):
     openrouter_model_2: str | None = Field(default=None, alias="OPENROUTER_MODEL_2")
     openrouter_model_3: str | None = Field(default=None, alias="OPENROUTER_MODEL_3")
     openrouter_vision_model_1: str | None = Field(
-        default="nex-agi/nex-n2-pro:free",
+        default=None,
         alias="OPENROUTER_VISION_MODEL_1",
     )
     openrouter_vision_model_2: str | None = Field(
@@ -89,22 +95,32 @@ class Settings(BaseSettings):
 
     @property
     def openrouter_models(self) -> list[str]:
-        models = [
+        models = [self.chat_model, self.fallback_model]
+        legacy_models = [
             self.openrouter_model_1,
             self.openrouter_model_2,
             self.openrouter_model_3,
             self.openrouter_model,
         ]
-        return _clean_models(models) or [OPENROUTER_DEFAULT_MODEL]
+        return _clean_models(models + legacy_models) or [
+            OPENROUTER_DEFAULT_CHAT_MODEL,
+            OPENROUTER_DEFAULT_FALLBACK_MODEL,
+        ]
 
     @property
     def openrouter_vision_models(self) -> list[str]:
+        if self.vision_model:
+            return _clean_models([self.vision_model])
         models = [
             self.openrouter_vision_model_1,
             self.openrouter_vision_model_2,
             self.openrouter_vision_model_3,
         ]
         return _clean_models(models)
+
+    @property
+    def openrouter_reasoning_models(self) -> list[str]:
+        return _clean_models([self.reasoning_model, self.fallback_model])
 
     @property
     def image_models(self) -> list[str]:

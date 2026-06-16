@@ -7,11 +7,13 @@ LolaBot - Telegram uchun o'zbekcha yordamchi bot. Bot `aiogram` bilan ishlaydi, 
 - Telegram bot `aiogram` 3 asosida ishlaydi.
 - OpenRouter API orqali free text modeliga ulanadi.
 - `OPENROUTER_API_KEY_1/2/3/4/5` bo'yicha key rotation ishlaydi.
-- `OPENROUTER_MODEL_1/2/3` bo'yicha model fallback ishlaydi.
-- Rasmda faqat `OPENROUTER_VISION_MODEL_1/2/3` ishlaydi.
+- Oddiy chat `CHAT_MODEL` orqali ishlaydi.
+- `CHAT_MODEL` limit yoki provider xatosiga tushsa `FALLBACK_MODEL` ishlaydi.
+- Rasmda faqat `VISION_MODEL` ishlaydi.
+- Matematika va murakkab reasoning savollar `REASONING_MODEL` orqali ishlaydi.
 - `/image <prompt>` orqali OpenRouter image model bilan rasm yaratadi.
 - `IMAGE_MODEL_1/2` bo'yicha image model fallback ishlaydi.
-- Default model: `google/gemma-4-31b-it:free`.
+- Default chat model: `meta-llama/llama-3.3-70b-instruct:free`.
 - Warzone/MW3 meta javoblari CODMunity parser + WZStatsGG fallback + chat state orqali beriladi.
 - `MAIN_GROUP_ID` berilsa, asosiy guruh bot javob limitidan ozod bo'ladi.
 - Telegram Stars orqali premium: 1 kun test 29 Stars, 1 oy premium 250 Stars.
@@ -127,13 +129,10 @@ OPENROUTER_API_KEY_2=
 OPENROUTER_API_KEY_3=
 OPENROUTER_API_KEY_4=
 OPENROUTER_API_KEY_5=
-OPENROUTER_MODEL=google/gemma-4-31b-it:free
-OPENROUTER_MODEL_1=google/gemma-4-31b-it:free
-OPENROUTER_MODEL_2=nex-agi/nex-n2-pro:free
-OPENROUTER_MODEL_3=
-OPENROUTER_VISION_MODEL_1=nex-agi/nex-n2-pro:free
-OPENROUTER_VISION_MODEL_2=
-OPENROUTER_VISION_MODEL_3=
+CHAT_MODEL=meta-llama/llama-3.3-70b-instruct:free
+FALLBACK_MODEL=google/gemma-3-27b-it:free
+VISION_MODEL=nex-agi/nex-n2-pro:free
+REASONING_MODEL=gemini-1.5-flash
 IMAGE_MODEL_1=sourceful/riverflow-v2.5-pro:free
 IMAGE_MODEL_2=sourceful/riverflow-v2.5-fast:free
 ```
@@ -158,13 +157,10 @@ OPENROUTER_API_KEY_2=
 OPENROUTER_API_KEY_3=
 OPENROUTER_API_KEY_4=
 OPENROUTER_API_KEY_5=
-OPENROUTER_MODEL=google/gemma-4-31b-it:free
-OPENROUTER_MODEL_1=google/gemma-4-31b-it:free
-OPENROUTER_MODEL_2=nex-agi/nex-n2-pro:free
-OPENROUTER_MODEL_3=
-OPENROUTER_VISION_MODEL_1=nex-agi/nex-n2-pro:free
-OPENROUTER_VISION_MODEL_2=
-OPENROUTER_VISION_MODEL_3=
+CHAT_MODEL=meta-llama/llama-3.3-70b-instruct:free
+FALLBACK_MODEL=google/gemma-3-27b-it:free
+VISION_MODEL=nex-agi/nex-n2-pro:free
+REASONING_MODEL=gemini-1.5-flash
 IMAGE_MODEL_1=sourceful/riverflow-v2.5-pro:free
 IMAGE_MODEL_2=sourceful/riverflow-v2.5-fast:free
 ```
