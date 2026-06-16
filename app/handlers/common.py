@@ -140,6 +140,54 @@ async def _should_answer(message: Message, bot: Bot) -> bool:
     return message.reply_to_message.from_user.id == me.id
 
 
+async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -> bool:
+    if message.chat.type == "private":
+        _log_media_decision(message, is_reply_to_bot=False, mentioned_bot=False, allowed=True)
+        return True
+
+    me = await bot.me()
+    bot_username = (me.username or "").lower()
+    caption = message.caption or ""
+    is_reply_to_bot = bool(
+        message.reply_to_message
+        and message.reply_to_message.from_user
+        and message.reply_to_message.from_user.id == me.id
+    )
+    mentioned_bot = bool(bot_username and f"@{bot_username}" in caption.lower())
+    mentions_lola = "lola" in normalize_text(caption)
+    is_main_group = bool(settings.main_group_id is not None and int(message.chat.id) == int(settings.main_group_id))
+    allowed = is_reply_to_bot or mentioned_bot or mentions_lola or is_main_group
+
+    _log_media_decision(
+        message,
+        is_reply_to_bot=is_reply_to_bot,
+        mentioned_bot=mentioned_bot,
+        allowed=allowed,
+    )
+    return allowed
+
+
+def _log_media_decision(
+    message: Message,
+    *,
+    is_reply_to_bot: bool,
+    mentioned_bot: bool,
+    allowed: bool,
+) -> None:
+    logger.info(
+        "media_handler_decision chat_type=%s chat_id=%s has_photo=%s has_document=%s caption=%r "
+        "is_reply_to_bot=%s mentioned_bot=%s allowed_in_group=%s",
+        message.chat.type,
+        message.chat.id,
+        bool(message.photo),
+        bool(message.document),
+        (message.caption or "")[:300],
+        is_reply_to_bot,
+        mentioned_bot,
+        allowed,
+    )
+
+
 def _chunks(text: str, limit: int = TELEGRAM_TEXT_LIMIT) -> list[str]:
     return [text[i : i + limit] for i in range(0, len(text), limit)]
 
@@ -923,8 +971,9 @@ async def image_message_handler(
     bot: Bot,
     ai_provider: AIProvider,
     stats_service: StatsService,
+    settings: Settings,
 ) -> None:
-    if not await _should_answer(message, bot):
+    if not await _should_answer_media(message, bot, settings):
         return
     if not await _check_usage_limit(message, stats_service):
         return

@@ -59,7 +59,7 @@ deb javob beradi.
 
 ## Statistika
 
-Bot guruhlarda barcha xabarlarni sanaydi. Oddiy xabarlarga javob bermaydi; Lola bilan gaplashish uchun guruhda uning xabariga reply qilish kerak. Statistika, memory va kunlik limitlar uchun PostgreSQL `DATABASE_URL` kerak. Private chat kuniga 10 ta, boshqa guruhlar kuniga 9 ta bepul bot javobidan foydalanadi. `MAIN_GROUP_ID` asosiy guruhni bepul qiladi.
+Bot guruhlarda barcha xabarlarni sanaydi. Oddiy xabarlarga javob bermaydi; Lola bilan gaplashish uchun guruhda uning xabariga reply qilish kerak. Guruhdagi rasm/skrinshotlarga faqat botga reply qilinganda, captionda `@bot_username` yoki `Lola` yozilganda javob beradi. `MAIN_GROUP_ID` asosiy guruh bo'lsa, oddiy rasmga ham javob berishi mumkin. Agar bot guruhdagi oddiy rasm update'larini umuman olmasa, BotFather orqali privacy mode'ni o'chiring: `/setprivacy` -> `Disable`. Statistika, memory va kunlik limitlar uchun PostgreSQL `DATABASE_URL` kerak. Private chat kuniga 10 ta, boshqa guruhlar kuniga 9 ta bepul bot javobidan foydalanadi. `MAIN_GROUP_ID` asosiy guruhni bepul qiladi.
 
 Buyruqlar:
 
