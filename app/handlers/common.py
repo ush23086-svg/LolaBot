@@ -326,6 +326,41 @@ async def _send_video_reply(message: Message, filename: str) -> None:
         await message.reply("Videoni yubora olmadim.")
 
 
+def _image_file_id(message: Message) -> str | None:
+    if message.photo:
+        return message.photo[-1].file_id
+
+    document = message.document
+    if not document:
+        return None
+
+    mime_type = document.mime_type or ""
+    if mime_type.startswith("image/"):
+        return document.file_id
+
+    return None
+
+
+async def _download_image_base64(message: Message, bot: Bot) -> str | None:
+    file_id = _image_file_id(message)
+    if not file_id:
+        return None
+
+    file = await bot.get_file(file_id)
+    if not file.file_path:
+        return None
+
+    buffer = await bot.download_file(file.file_path)
+    if buffer is None:
+        return None
+
+    data = buffer.read()
+    if not data:
+        return None
+
+    return base64.b64encode(data).decode("ascii")
+
+
 async def _check_usage_limit(message: Message, stats_service: StatsService) -> bool:
     user = message.from_user
     if not user or user.is_bot:
@@ -882,8 +917,8 @@ async def image_command_handler(
         await status.edit_text("Rasm yaratishda muammo bo'ldi. Keyinroq urinib ko'ring.")
 
 
-@router.message(F.photo)
-async def photo_handler(
+@router.message(F.photo | F.document)
+async def image_message_handler(
     message: Message,
     bot: Bot,
     ai_provider: AIProvider,
@@ -897,15 +932,11 @@ async def photo_handler(
     status = await message.reply("Rasmni ko'rib chiqyapman...")
 
     try:
-        photo = message.photo[-1]
-        file = await bot.get_file(photo.file_id)
-        buffer = await bot.download_file(file.file_path)
-
-        if buffer is None:
-            await status.edit_text("Rasmni yuklab olishda muammo bo'ldi. Qayta yuborib ko'ring.")
+        image_base64 = await _download_image_base64(message, bot)
+        if not image_base64:
+            await status.edit_text("Rasmni yuklab olishda muammo bo'ldi. Rasm yoki skrinshotni qayta yuboring.")
             return
 
-        image_base64 = base64.b64encode(buffer.read()).decode("ascii")
         answer = await ai_provider.analyze_image(
             image_base64=image_base64,
             user_name=_user_label(message),
@@ -915,7 +946,7 @@ async def photo_handler(
         await _send_answer(message, answer, status=status)
         await _save_memory(message, stats_service, message.caption or "[rasm]", answer)
     except Exception:
-        logger.exception("Photo handling failed")
+        logger.exception("Image media handling failed")
         await status.edit_text("Rasmni tahlil qilishda xatolik bo'ldi. Keyinroq qayta urinib ko'ring.")
 
 
