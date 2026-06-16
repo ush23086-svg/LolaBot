@@ -148,6 +148,7 @@ async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -
             is_reply_to_bot=False,
             mentioned_bot=False,
             allowed=True,
+            reason="private",
         )
         return True
 
@@ -163,6 +164,16 @@ async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -
     mentions_lola = "lola" in normalize_text(caption)
     is_main_group = bool(settings.main_group_id is not None and int(message.chat.id) == int(settings.main_group_id))
     allowed = is_reply_to_bot or mentioned_bot or mentions_lola or is_main_group
+    if is_main_group:
+        reason = "main_group"
+    elif is_reply_to_bot:
+        reason = "reply_to_bot"
+    elif mentioned_bot:
+        reason = "bot_mentioned"
+    elif mentions_lola:
+        reason = "caption_lola"
+    else:
+        reason = "ignored_not_addressed"
 
     _log_media_decision(
         message,
@@ -170,6 +181,7 @@ async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -
         is_reply_to_bot=is_reply_to_bot,
         mentioned_bot=mentioned_bot,
         allowed=allowed,
+        reason=reason,
     )
     return allowed
 
@@ -181,10 +193,11 @@ def _log_media_decision(
     is_reply_to_bot: bool,
     mentioned_bot: bool,
     allowed: bool,
+    reason: str,
 ) -> None:
     logger.info(
         "media_handler_decision chat_type=%s chat_id=%s has_photo=%s has_document=%s caption=%r "
-        "is_main_group=%s is_reply_to_bot=%s mentioned_bot=%s allowed_in_group=%s",
+        "is_main_group=%s is_reply_to_bot=%s mentioned_bot=%s allowed_in_group=%s reason=%s",
         message.chat.type,
         message.chat.id,
         bool(message.photo),
@@ -194,6 +207,7 @@ def _log_media_decision(
         is_reply_to_bot,
         mentioned_bot,
         allowed,
+        reason,
     )
 
 
@@ -911,6 +925,19 @@ async def check_handler(message: Message, stats_service: StatsService, settings:
     )
 
 
+@router.message(Command("chat_id", "debug_chat"))
+async def debug_chat_handler(message: Message, settings: Settings) -> None:
+    if not _is_owner(message, settings):
+        return
+
+    is_main_group = bool(settings.main_group_id is not None and int(message.chat.id) == int(settings.main_group_id))
+    await message.reply(
+        f"chat_type: {message.chat.type}\n"
+        f"chat_id: {message.chat.id}\n"
+        f"MAIN_GROUP_ID match: {is_main_group}"
+    )
+
+
 @router.message(Command("keys_status"))
 async def keys_status_handler(
     message: Message,
@@ -974,14 +1001,43 @@ async def image_command_handler(
         await status.edit_text("Rasm yaratishda muammo bo'ldi. Keyinroq urinib ko'ring.")
 
 
-@router.message(F.photo | F.document)
-async def image_message_handler(
+@router.message(F.photo)
+async def photo_message_handler(
     message: Message,
     bot: Bot,
     ai_provider: AIProvider,
     stats_service: StatsService,
     settings: Settings,
 ) -> None:
+    await _handle_image_message(message, bot, ai_provider, stats_service, settings)
+
+
+@router.message(F.document)
+async def document_image_message_handler(
+    message: Message,
+    bot: Bot,
+    ai_provider: AIProvider,
+    stats_service: StatsService,
+    settings: Settings,
+) -> None:
+    await _handle_image_message(message, bot, ai_provider, stats_service, settings)
+
+
+async def _handle_image_message(
+    message: Message,
+    bot: Bot,
+    ai_provider: AIProvider,
+    stats_service: StatsService,
+    settings: Settings,
+) -> None:
+    logger.info(
+        "media_handler_received chat_type=%s chat_id=%s has_photo=%s has_document=%s caption=%r",
+        message.chat.type,
+        message.chat.id,
+        bool(message.photo),
+        bool(message.document),
+        (message.caption or "")[:300],
+    )
     if not await _should_answer_media(message, bot, settings):
         return
     if not await _check_usage_limit(message, stats_service):

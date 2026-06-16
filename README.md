@@ -69,6 +69,7 @@ Buyruqlar:
 /month
 /image quyosh botayotgan shahar
 /premium
+/chat_id
 ```
 
 ## Premium
@@ -91,6 +92,9 @@ Admin komandalar faqat `OWNER_ID` uchun private chatda ishlaydi:
 /check <user_id>
 /grant <user_id> [days]
 /revoke <user_id>
+/keys_status
+/vision_status
+/chat_id
 ```
 
 ## Local ishga tushirish
