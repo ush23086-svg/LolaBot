@@ -163,10 +163,8 @@ async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -
     mentioned_bot = bool(bot_username and f"@{bot_username}" in caption.lower())
     mentions_lola = "lola" in normalize_text(caption)
     is_main_group = bool(settings.main_group_id is not None and int(message.chat.id) == int(settings.main_group_id))
-    allowed = is_reply_to_bot or mentioned_bot or mentions_lola or is_main_group
-    if is_main_group:
-        reason = "main_group"
-    elif is_reply_to_bot:
+    allowed = is_reply_to_bot or mentioned_bot or mentions_lola
+    if is_reply_to_bot:
         reason = "reply_to_bot"
     elif mentioned_bot:
         reason = "bot_mentioned"

@@ -140,7 +140,7 @@ class OpenRouterProvider(AIProvider):
         self.image_models = image_models
         self.reasoning_models = reasoning_models or []
         self.app_name = app_name
-        self._key_cooldowns: dict[tuple[str, int], tuple[float, str]] = {}
+        self._key_cooldowns: dict[tuple[str, int, str], tuple[float, str]] = {}
 
     async def ask_ai(self, text: str, user_name: str, reply_context: str = "") -> str:
         user_content = f"Foydalanuvchi: {user_name}\n"
@@ -419,7 +419,7 @@ class OpenRouterProvider(AIProvider):
         combinations = self._completion_combinations(models, operation)
         for model_index, model, key_index, api_key in combinations:
             model_payload = {**payload, "model": model}
-            if self._is_key_on_cooldown(key_index, operation):
+            if self._is_key_on_cooldown(key_index, operation, model):
                 skipped += 1
                 logger.info(
                     "OpenRouter operation=%s model=%s model_index=%s KEY_%s skipped by temporary cooldown",
@@ -455,7 +455,7 @@ class OpenRouterProvider(AIProvider):
                                 rate_headers,
                             )
                             if _should_skip_key(response.status, data, rate_headers):
-                                self._cooldown_key(key_index, reason, operation)
+                                self._cooldown_key(key_index, reason, operation, model)
                             if not _should_try_next_combination(response.status, data, rate_headers):
                                 reason = f"non-retryable {reason}"
                             _log_next_rotation(
@@ -470,7 +470,13 @@ class OpenRouterProvider(AIProvider):
             except aiohttp.ClientError as exc:
                 reason = "request failed"
                 if operation != "vision":
-                    self._cooldown_key(key_index, reason, operation, seconds=TIMEOUT_COOLDOWN_SECONDS)
+                    self._cooldown_key(
+                        key_index,
+                        reason,
+                        operation,
+                        model,
+                        seconds=TIMEOUT_COOLDOWN_SECONDS,
+                    )
                 logger.exception(
                     "KEY_%s model=%s failed status=request_failed reason=%s operation=%s",
                     key_index,
@@ -482,7 +488,13 @@ class OpenRouterProvider(AIProvider):
             except TimeoutError as exc:
                 reason = "timeout"
                 if operation != "vision":
-                    self._cooldown_key(key_index, reason, operation, seconds=TIMEOUT_COOLDOWN_SECONDS)
+                    self._cooldown_key(
+                        key_index,
+                        reason,
+                        operation,
+                        model,
+                        seconds=TIMEOUT_COOLDOWN_SECONDS,
+                    )
                 logger.warning(
                     "KEY_%s model=%s failed status=timeout reason=%s operation=%s",
                     key_index,
@@ -544,14 +556,8 @@ class OpenRouterProvider(AIProvider):
     def _completion_combinations(self, models: list[str], operation: str) -> list[tuple[int, str, int, str]]:
         ordered_keys = self._ordered_keys(operation)
         combinations: list[tuple[int, str, int, str]] = []
-        if operation == "vision":
-            for key_index, api_key in ordered_keys:
-                for model_index, model in enumerate(models, start=1):
-                    combinations.append((model_index, model, key_index, api_key))
-            return combinations
-
-        for model_index, model in enumerate(models, start=1):
-            for key_index, api_key in ordered_keys:
+        for key_index, api_key in ordered_keys:
+            for model_index, model in enumerate(models, start=1):
                 combinations.append((model_index, model, key_index, api_key))
         return combinations
 
@@ -562,13 +568,13 @@ class OpenRouterProvider(AIProvider):
         ordered.extend((index, key) for index, key in self.api_keys if index not in priority)
         return ordered
 
-    def _is_key_on_cooldown(self, key_index: int, operation: str) -> bool:
-        cooldown = self._key_cooldowns.get((operation, key_index))
+    def _is_key_on_cooldown(self, key_index: int, operation: str, model: str) -> bool:
+        cooldown = self._key_cooldowns.get((operation, key_index, model))
         if not cooldown:
             return False
         until, _ = cooldown
         if until <= time.monotonic():
-            self._key_cooldowns.pop((operation, key_index), None)
+            self._key_cooldowns.pop((operation, key_index, model), None)
             return False
         return True
 
@@ -577,13 +583,15 @@ class OpenRouterProvider(AIProvider):
         key_index: int,
         reason: str,
         operation: str,
+        model: str,
         seconds: int = KEY_COOLDOWN_SECONDS,
     ) -> None:
-        self._key_cooldowns[(operation, key_index)] = (time.monotonic() + seconds, reason)
+        self._key_cooldowns[(operation, key_index, model)] = (time.monotonic() + seconds, reason)
         logger.warning(
-            "OpenRouter KEY_%s operation=%s temporarily skipped for %ss because of %s",
+            "OpenRouter KEY_%s operation=%s model=%s temporarily skipped for %ss because of %s",
             key_index,
             operation,
+            model,
             seconds,
             reason,
         )
@@ -792,6 +800,18 @@ def _log_next_rotation(
     keys_count: int,
     reason: str,
 ) -> None:
+    if model_index < len(models):
+        next_model = models[model_index]
+        logger.info(
+            "OpenRouter rotation: model=%s reason=%s KEY_%s switching to model=%s model_index=%s",
+            model,
+            reason,
+            key_index,
+            next_model,
+            model_index + 1,
+        )
+        return
+
     if key_index < keys_count:
         logger.info(
             "OpenRouter rotation: model=%s model_index=%s reason=%s KEY_%s -> KEY_%s",
@@ -800,18 +820,6 @@ def _log_next_rotation(
             reason,
             key_index,
             key_index + 1,
-        )
-        return
-
-    if model_index < len(models):
-        next_model = models[model_index]
-        logger.info(
-            "OpenRouter rotation: model=%s reason=%s KEY_%s exhausted, switching to model=%s model_index=%s",
-            model,
-            reason,
-            key_index,
-            next_model,
-            model_index + 1,
         )
         return
 

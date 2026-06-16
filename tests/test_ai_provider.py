@@ -1,6 +1,11 @@
 import unittest
 
 from app.services import ai_provider as provider_module
+from app.config import (
+    OPENROUTER_DEFAULT_FALLBACK_MODEL,
+    OPENROUTER_DEFAULT_REASONING_MODEL,
+    _clean_models,
+)
 from app.services.ai_provider import OpenRouterProvider
 
 
@@ -111,6 +116,31 @@ class OpenRouterProviderTest(unittest.IsolatedAsyncioTestCase):
             ["Bearer secret-key-1", "Bearer secret-key-3", "Bearer secret-key-2"],
         )
 
+    async def test_chat_429_still_tries_fallback_model_on_same_key(self):
+        FakeSession.responses = [
+            FakeResponse(429, {"error": "rate limit"}, {"X-RateLimit-Remaining": "0"}),
+            FakeResponse(200, {"choices": [{"message": {"content": "fallback ok"}}]}),
+        ]
+        provider = OpenRouterProvider(
+            api_keys=[(1, "secret-key-1"), (3, "secret-key-3")],
+            models=["chat-model", "fallback-model"],
+            vision_models=[],
+            image_models=[],
+            app_name="Lola",
+        )
+
+        answer = await provider.ask_ai("hi", "Tester")
+
+        self.assertEqual(answer, "fallback ok")
+        self.assertEqual(
+            [attempt["model"] for attempt in FakeSession.attempts],
+            ["chat-model", "fallback-model"],
+        )
+        self.assertEqual(
+            [attempt["authorization"] for attempt in FakeSession.attempts],
+            ["Bearer secret-key-1", "Bearer secret-key-1"],
+        )
+
     async def test_reasoning_request_uses_reasoning_model(self):
         FakeSession.responses = [
             FakeResponse(200, {"choices": [{"message": {"content": "4"}}]}),
@@ -210,6 +240,16 @@ class OpenRouterProviderTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("secret-key", text)
         self.assertEqual([attempt["model"] for attempt in FakeSession.attempts], ["vision-model-1", "vision-model-2"])
         self.assertIsInstance(FakeSession.attempts[0]["content"], list)
+
+
+class ModelConfigTest(unittest.TestCase):
+    def test_bad_railway_model_names_are_normalized(self):
+        models = _clean_models(["google/gemma-3-27b-it:free", "gemini-1.5-flash"])
+
+        self.assertEqual(
+            models,
+            [OPENROUTER_DEFAULT_FALLBACK_MODEL, OPENROUTER_DEFAULT_REASONING_MODEL],
+        )
 
 
 if __name__ == "__main__":

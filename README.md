@@ -61,7 +61,7 @@ deb javob beradi.
 
 ## Statistika
 
-Bot guruhlarda barcha xabarlarni sanaydi. Oddiy xabarlarga javob bermaydi; Lola bilan gaplashish uchun guruhda uning xabariga reply qilish kerak. Guruhdagi rasm/skrinshotlarga faqat botga reply qilinganda, captionda `@bot_username` yoki `Lola` yozilganda javob beradi. `MAIN_GROUP_ID` asosiy guruh bo'lsa, oddiy rasmga ham javob berishi mumkin. Agar bot guruhdagi oddiy rasm update'larini umuman olmasa, BotFather orqali privacy mode'ni o'chiring: `/setprivacy` -> `Disable`. Statistika, memory va kunlik limitlar uchun PostgreSQL `DATABASE_URL` kerak. Private chat kuniga 10 ta, boshqa guruhlar kuniga 9 ta bepul bot javobidan foydalanadi. `MAIN_GROUP_ID` asosiy guruhni bepul qiladi.
+Bot guruhlarda barcha xabarlarni sanaydi. Oddiy xabarlarga javob bermaydi; Lola bilan gaplashish uchun guruhda uning xabariga reply qilish kerak. Guruhdagi rasm/skrinshotlarga faqat botga reply qilinganda, captionda `@bot_username` yoki `Lola` yozilganda javob beradi. Oddiy replysiz/captionsiz rasmga asosiy guruhda ham javob bermaydi. Agar bot guruhdagi oddiy rasm update'larini umuman olmasa, BotFather orqali privacy mode'ni o'chiring: `/setprivacy` -> `Disable`. Statistika, memory va kunlik limitlar uchun PostgreSQL `DATABASE_URL` kerak. Private chat kuniga 10 ta, boshqa guruhlar kuniga 9 ta bepul bot javobidan foydalanadi. `MAIN_GROUP_ID` asosiy guruhni bepul qiladi.
 
 Buyruqlar:
 
@@ -130,9 +130,9 @@ OPENROUTER_API_KEY_3=
 OPENROUTER_API_KEY_4=
 OPENROUTER_API_KEY_5=
 CHAT_MODEL=meta-llama/llama-3.3-70b-instruct:free
-FALLBACK_MODEL=google/gemma-3-27b-it:free
+FALLBACK_MODEL=google/gemma-3-27b-it
 VISION_MODEL=nex-agi/nex-n2-pro:free
-REASONING_MODEL=gemini-1.5-flash
+REASONING_MODEL=google/gemini-3.5-flash
 IMAGE_MODEL_1=sourceful/riverflow-v2.5-pro:free
 IMAGE_MODEL_2=sourceful/riverflow-v2.5-fast:free
 ```
@@ -158,9 +158,9 @@ OPENROUTER_API_KEY_3=
 OPENROUTER_API_KEY_4=
 OPENROUTER_API_KEY_5=
 CHAT_MODEL=meta-llama/llama-3.3-70b-instruct:free
-FALLBACK_MODEL=google/gemma-3-27b-it:free
+FALLBACK_MODEL=google/gemma-3-27b-it
 VISION_MODEL=nex-agi/nex-n2-pro:free
-REASONING_MODEL=gemini-1.5-flash
+REASONING_MODEL=google/gemini-3.5-flash
 IMAGE_MODEL_1=sourceful/riverflow-v2.5-pro:free
 IMAGE_MODEL_2=sourceful/riverflow-v2.5-fast:free
 ```

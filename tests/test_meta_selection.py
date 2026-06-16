@@ -1,3 +1,4 @@
+import asyncio
 import time
 import unittest
 from types import SimpleNamespace
@@ -6,6 +7,7 @@ from app.handlers.common import (
     CHAT_DATA,
     _safe_loadout_error,
     _should_handle_meta_list,
+    _should_answer_media,
     _meta_contexts,
     _meta_weapons_from_context,
     _reply_meta_weapons,
@@ -38,6 +40,24 @@ def fake_message(chat_id=100, user_id=200, reply_text=None):
     return SimpleNamespace(
         chat=SimpleNamespace(id=chat_id),
         from_user=SimpleNamespace(id=user_id),
+        reply_to_message=reply,
+    )
+
+
+class FakeBot:
+    async def me(self):
+        return SimpleNamespace(id=999, username="LolaBot")
+
+
+def fake_media_message(chat_type="group", chat_id=100, caption="", reply_from_user_id=None):
+    reply = None
+    if reply_from_user_id is not None:
+        reply = SimpleNamespace(from_user=SimpleNamespace(id=reply_from_user_id))
+    return SimpleNamespace(
+        chat=SimpleNamespace(id=chat_id, type=chat_type),
+        caption=caption,
+        photo=[SimpleNamespace(file_id="photo")],
+        document=None,
         reply_to_message=reply,
     )
 
@@ -185,6 +205,35 @@ class MetaSelectionTest(unittest.TestCase):
         self.assertEqual(requested_game("Ranked"), "resurgence_ranked")
         self.assertEqual(requested_game("BR Ranked"), "ranked_unavailable")
         self.assertTrue(_should_handle_meta_list("Ranked", requested_game("Ranked")))
+
+    def test_group_media_ignores_plain_photo_even_in_main_group(self):
+        message = fake_media_message(chat_type="group", chat_id=100, caption="")
+        settings = SimpleNamespace(main_group_id=100)
+
+        allowed = asyncio.run(_should_answer_media(message, FakeBot(), settings))
+
+        self.assertFalse(allowed)
+
+    def test_group_media_allows_reply_to_bot_or_lola_caption(self):
+        settings = SimpleNamespace(main_group_id=None)
+
+        reply_allowed = asyncio.run(
+            _should_answer_media(
+                fake_media_message(chat_type="group", reply_from_user_id=999),
+                FakeBot(),
+                settings,
+            )
+        )
+        caption_allowed = asyncio.run(
+            _should_answer_media(
+                fake_media_message(chat_type="group", caption="Lola, buni ko'r"),
+                FakeBot(),
+                settings,
+            )
+        )
+
+        self.assertTrue(reply_allowed)
+        self.assertTrue(caption_allowed)
 
     def test_codmunity_success_skips_wzstats_fallback(self):
         client = object.__new__(CodmunityClient)

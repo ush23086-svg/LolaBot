@@ -4,8 +4,9 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 OPENROUTER_DEFAULT_CHAT_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
-OPENROUTER_DEFAULT_FALLBACK_MODEL = "google/gemma-3-27b-it:free"
+OPENROUTER_DEFAULT_FALLBACK_MODEL = "google/gemma-3-27b-it"
 OPENROUTER_DEFAULT_VISION_MODEL = "nex-agi/nex-n2-pro:free"
+OPENROUTER_DEFAULT_REASONING_MODEL = "google/gemini-3.5-flash"
 OPENROUTER_DEFAULT_MODEL = OPENROUTER_DEFAULT_CHAT_MODEL
 OPENROUTER_DEFAULT_IMAGE_MODELS = [
     "sourceful/riverflow-v2.5-pro:free",
@@ -13,6 +14,10 @@ OPENROUTER_DEFAULT_IMAGE_MODELS = [
 ]
 OPENROUTER_LEGACY_MODEL_ALIASES = {
     "google/gemma-3n-e4b-it:free": OPENROUTER_DEFAULT_CHAT_MODEL,
+    "google/gemma-3-27b-it:free": OPENROUTER_DEFAULT_FALLBACK_MODEL,
+    "gemini-1.5-flash": OPENROUTER_DEFAULT_REASONING_MODEL,
+    "google/gemini-1.5-flash": OPENROUTER_DEFAULT_REASONING_MODEL,
+    "google/gemini-flash-1.5": OPENROUTER_DEFAULT_REASONING_MODEL,
     "meta-llama/llama-3.2-3b-instruct:free": OPENROUTER_DEFAULT_CHAT_MODEL,
 }
 
