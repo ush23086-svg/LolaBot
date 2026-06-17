@@ -47,6 +47,8 @@ META_CONTEXT_TTL_SECONDS = 15 * 60
 
 VIDEO_FILENAME = "SaveVid_Net_AQNKnUIQh4au0ukBFQeeBEE9GNtzkOFvNFXUDTipfHHr9qwI5m8RUCHhFxyUIY.mp4"
 VIDEO_SONG2_FILENAME = "video_2026-05-31_21-36-53.mp4"
+SUPPORTED_IMAGE_DOCUMENT_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+UNSUPPORTED_MEDIA_REPLY = "GIF/video ko'rishni hozircha eplay olmayman. Oddiy rasm yoki skrinshot yuboring 😊"
 PREMIUM_PLANS = {
     "test": {
         "title": "Lola Premium - 1 kun test",
@@ -73,7 +75,16 @@ LOLA_PRESENCE_RE = re.compile(
     re.IGNORECASE,
 )
 PRESENCE_REPLIES = ["Xa, shu yerdaman 🙂", "Eshitaman.", "Shu yerdaman."]
-LOLA_WAKEUP_REPLY = "Labbay, shu yerdaman 😊"
+LOLA_WAKEUP_REPLIES = [
+    "Labbay 😊",
+    "Shu yerdaman 😊",
+    "Bugun kuning qanday o'tdi?",
+    "Tinglayapman 😊",
+    "Ha, 😊",
+    "Labbay, gapiring 😊",
+    "Men shu yerdaman 😊",
+]
+_LAST_LOLA_WAKEUP_REPLY: str | None = None
 MEMORY_RE = re.compile(
     r"(kecha|oldin|avval).*(nima|gaplash|yozish)|nimani gaplashdik",
     re.IGNORECASE,
@@ -131,7 +142,15 @@ def _greeting_for(message: Message) -> str:
 
 
 def _is_exact_lola_wakeup(text: str) -> bool:
-    return normalize_text(text) == "lola"
+    return bool(re.fullmatch(r"lo+la+", normalize_text(text)))
+
+
+def _lola_wakeup_reply() -> str:
+    global _LAST_LOLA_WAKEUP_REPLY
+    choices = [reply for reply in LOLA_WAKEUP_REPLIES if reply != _LAST_LOLA_WAKEUP_REPLY]
+    reply = random.choice(choices or LOLA_WAKEUP_REPLIES)
+    _LAST_LOLA_WAKEUP_REPLY = reply
+    return reply
 
 
 def _mentions_lola(text: str) -> bool:
@@ -245,6 +264,95 @@ async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -
     return allowed
 
 
+def _media_content_type(message: Message) -> str:
+    content_type = getattr(message, "content_type", None)
+    if content_type:
+        return str(content_type)
+    if getattr(message, "photo", None):
+        return "photo"
+    if getattr(message, "animation", None):
+        return "animation"
+    if getattr(message, "video", None):
+        return "video"
+    if getattr(message, "sticker", None):
+        return "sticker"
+    if getattr(message, "document", None):
+        return "document"
+    return "unknown"
+
+
+def _media_mime_type(message: Message) -> str:
+    for attr in ("document", "animation", "video"):
+        media = getattr(message, attr, None)
+        mime_type = getattr(media, "mime_type", None)
+        if mime_type:
+            return str(mime_type)
+    return ""
+
+
+def _is_gif_message(message: Message) -> bool:
+    return _media_mime_type(message).lower() == "image/gif"
+
+
+def _is_animation_message(message: Message) -> bool:
+    return bool(getattr(message, "animation", None))
+
+
+def _is_unsupported_gif_or_video(message: Message) -> bool:
+    mime_type = _media_mime_type(message).lower()
+    return (
+        _is_animation_message(message)
+        or bool(getattr(message, "video", None))
+        or bool(getattr(message, "sticker", None))
+        or mime_type == "image/gif"
+        or mime_type.startswith("video/")
+    )
+
+
+def _is_supported_image_message(message: Message) -> bool:
+    if getattr(message, "photo", None):
+        return True
+
+    document = getattr(message, "document", None)
+    if not document:
+        return False
+
+    return (_media_mime_type(message).lower() in SUPPORTED_IMAGE_DOCUMENT_MIME_TYPES)
+
+
+async def _should_answer_unsupported_media(message: Message, bot: Bot) -> bool:
+    if message.chat.type == "private":
+        return True
+
+    me = await bot.me()
+    bot_username = (me.username or "").lower()
+    caption = message.caption or ""
+    is_reply_to_bot = bool(
+        message.reply_to_message
+        and message.reply_to_message.from_user
+        and message.reply_to_message.from_user.id == me.id
+    )
+    mentioned_bot = bool(bot_username and f"@{bot_username}" in caption.lower())
+    mentions_lola = "lola" in normalize_text(caption)
+    return is_reply_to_bot or mentioned_bot or mentions_lola
+
+
+def _log_unsupported_media_decision(message: Message, *, allowed: bool) -> None:
+    logger.info(
+        "unsupported_media_decision chat_type=%s chat_id=%s content_type=%s mime_type=%s "
+        "is_gif=%s is_animation=%s allowed=%s ignored_reason=%s caption=%r",
+        message.chat.type,
+        message.chat.id,
+        _media_content_type(message),
+        _media_mime_type(message),
+        _is_gif_message(message),
+        _is_animation_message(message),
+        allowed,
+        "unsupported_gif_or_video",
+        (message.caption or "")[:300],
+    )
+
+
 def _log_media_decision(
     message: Message,
     *,
@@ -256,12 +364,17 @@ def _log_media_decision(
 ) -> None:
     logger.info(
         "media_handler_decision chat_type=%s chat_id=%s has_photo=%s has_document=%s caption=%r "
+        "content_type=%s mime_type=%s is_gif=%s is_animation=%s "
         "is_main_group=%s is_reply_to_bot=%s mentioned_bot=%s allowed_in_group=%s reason=%s",
         message.chat.type,
         message.chat.id,
         bool(message.photo),
         bool(message.document),
         (message.caption or "")[:300],
+        _media_content_type(message),
+        _media_mime_type(message),
+        _is_gif_message(message),
+        _is_animation_message(message),
         is_main_group,
         is_reply_to_bot,
         mentioned_bot,
@@ -465,7 +578,7 @@ def _image_file_id(message: Message) -> str | None:
         return None
 
     mime_type = document.mime_type or ""
-    if mime_type.startswith("image/"):
+    if mime_type.lower() in SUPPORTED_IMAGE_DOCUMENT_MIME_TYPES:
         return document.file_id
 
     return None
@@ -1071,6 +1184,14 @@ async def photo_message_handler(
     await _handle_image_message(message, bot, ai_provider, stats_service, settings)
 
 
+@router.message(F.animation | F.video | F.sticker)
+async def unsupported_visual_media_handler(
+    message: Message,
+    bot: Bot,
+) -> None:
+    await _handle_unsupported_media(message, bot)
+
+
 @router.message(F.document)
 async def document_image_message_handler(
     message: Message,
@@ -1079,7 +1200,30 @@ async def document_image_message_handler(
     stats_service: StatsService,
     settings: Settings,
 ) -> None:
+    if _is_unsupported_gif_or_video(message):
+        await _handle_unsupported_media(message, bot)
+        return
+
+    if not _is_supported_image_message(message):
+        logger.info(
+            "document_media_ignored chat_type=%s chat_id=%s content_type=%s mime_type=%s ignored_reason=unsupported_document_not_image",
+            message.chat.type,
+            message.chat.id,
+            _media_content_type(message),
+            _media_mime_type(message),
+        )
+        return
+
     await _handle_image_message(message, bot, ai_provider, stats_service, settings)
+
+
+async def _handle_unsupported_media(message: Message, bot: Bot) -> None:
+    should_answer = await _should_answer_unsupported_media(message, bot)
+    _log_unsupported_media_decision(message, allowed=should_answer)
+    if not should_answer:
+        return
+
+    await message.reply(UNSUPPORTED_MEDIA_REPLY)
 
 
 async def _handle_image_message(
@@ -1090,12 +1234,17 @@ async def _handle_image_message(
     settings: Settings,
 ) -> None:
     logger.info(
-        "media_handler_received chat_type=%s chat_id=%s has_photo=%s has_document=%s caption=%r",
+        "media_handler_received chat_type=%s chat_id=%s has_photo=%s has_document=%s caption=%r "
+        "content_type=%s mime_type=%s is_gif=%s is_animation=%s",
         message.chat.type,
         message.chat.id,
         bool(message.photo),
         bool(message.document),
         (message.caption or "")[:300],
+        _media_content_type(message),
+        _media_mime_type(message),
+        _is_gif_message(message),
+        _is_animation_message(message),
     )
     if not await _should_answer_media(message, bot, settings):
         return
@@ -1151,7 +1300,7 @@ async def text_handler(
                 message.chat.type,
                 message.chat.id,
             )
-        await message.reply(LOLA_WAKEUP_REPLY)
+        await message.reply(_lola_wakeup_reply())
         return
 
     if not await _should_answer_text(message, bot):

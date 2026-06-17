@@ -5,11 +5,16 @@ from types import SimpleNamespace
 
 from app.handlers.common import (
     CHAT_DATA,
-    LOLA_WAKEUP_REPLY,
+    LOLA_WAKEUP_REPLIES,
+    UNSUPPORTED_MEDIA_REPLY,
+    _is_unsupported_gif_or_video,
+    _is_supported_image_message,
     _is_exact_lola_wakeup,
+    _lola_wakeup_reply,
     _safe_loadout_error,
     _should_handle_meta_list,
     _should_answer_media,
+    _should_answer_unsupported_media,
     _should_answer_text,
     _meta_contexts,
     _meta_weapons_from_context,
@@ -52,15 +57,32 @@ class FakeBot:
         return SimpleNamespace(id=999, username="LolaBot")
 
 
-def fake_media_message(chat_type="group", chat_id=100, caption="", reply_from_user_id=None):
+def fake_media_message(
+    chat_type="group",
+    chat_id=100,
+    caption="",
+    reply_from_user_id=None,
+    *,
+    photo=True,
+    document_mime_type=None,
+    animation=False,
+    video=False,
+    sticker=False,
+):
     reply = None
     if reply_from_user_id is not None:
         reply = SimpleNamespace(from_user=SimpleNamespace(id=reply_from_user_id))
+    document = None
+    if document_mime_type is not None:
+        document = SimpleNamespace(file_id="document", mime_type=document_mime_type)
     return SimpleNamespace(
         chat=SimpleNamespace(id=chat_id, type=chat_type),
         caption=caption,
-        photo=[SimpleNamespace(file_id="photo")],
-        document=None,
+        photo=[SimpleNamespace(file_id="photo")] if photo else [],
+        document=document,
+        animation=SimpleNamespace(file_id="animation", mime_type="image/gif") if animation else None,
+        video=SimpleNamespace(file_id="video", mime_type="video/mp4") if video else None,
+        sticker=SimpleNamespace(file_id="sticker") if sticker else None,
         reply_to_message=reply,
     )
 
@@ -249,11 +271,21 @@ class MetaSelectionTest(unittest.TestCase):
         self.assertTrue(reply_allowed)
         self.assertTrue(caption_allowed)
 
-    def test_exact_lola_wakeup_is_hardcoded(self):
+    def test_exact_lola_wakeup_is_random_reply_eligible(self):
         self.assertTrue(_is_exact_lola_wakeup("Lola"))
         self.assertTrue(_is_exact_lola_wakeup("Lola?"))
         self.assertTrue(_is_exact_lola_wakeup("Lola 😊"))
-        self.assertEqual(LOLA_WAKEUP_REPLY, "Labbay, shu yerdaman 😊")
+        self.assertTrue(_is_exact_lola_wakeup("Loola"))
+        self.assertTrue(_is_exact_lola_wakeup("Lolaa"))
+        self.assertFalse(_is_exact_lola_wakeup("Lola ishlayaptimi?"))
+        self.assertGreater(len(LOLA_WAKEUP_REPLIES), 1)
+
+    def test_lola_wakeup_replies_do_not_get_stuck(self):
+        replies = [_lola_wakeup_reply() for _ in range(6)]
+
+        self.assertGreater(len(set(replies)), 1)
+        for reply in replies:
+            self.assertIn(reply, LOLA_WAKEUP_REPLIES)
 
     def test_lola_mentioned_in_sentence_is_not_group_wakeup(self):
         message = fake_text_message(chat_type="group", text="Lola ishlayaptimi?")
@@ -283,9 +315,55 @@ class MetaSelectionTest(unittest.TestCase):
         self.assertTrue(allowed)
 
     def test_generic_support_reply_is_not_used_for_lola_wakeup(self):
-        self.assertNotIn("qanday yordam beray?", LOLA_WAKEUP_REPLY.lower())
-        self.assertNotIn("nima yordam kerak?", LOLA_WAKEUP_REPLY.lower())
-        self.assertNotIn("qanday yordam kerak?", LOLA_WAKEUP_REPLY.lower())
+        for reply in LOLA_WAKEUP_REPLIES:
+            lowered = reply.lower()
+            self.assertNotIn("qanday yordam beray?", lowered)
+            self.assertNotIn("nima yordam kerak?", lowered)
+            self.assertNotIn("qanday yordam kerak?", lowered)
+
+    def test_group_plain_gif_is_ignored(self):
+        message = fake_media_message(
+            chat_type="group",
+            photo=False,
+            document_mime_type="image/gif",
+        )
+
+        self.assertTrue(_is_unsupported_gif_or_video(message))
+        allowed = asyncio.run(_should_answer_unsupported_media(message, FakeBot()))
+
+        self.assertFalse(allowed)
+
+    def test_group_addressed_gif_gets_polite_unsupported_reply_path(self):
+        caption_message = fake_media_message(
+            chat_type="group",
+            caption="Lola",
+            photo=False,
+            document_mime_type="image/gif",
+        )
+        reply_message = fake_media_message(
+            chat_type="group",
+            photo=False,
+            document_mime_type="image/gif",
+            reply_from_user_id=999,
+        )
+
+        self.assertTrue(_is_unsupported_gif_or_video(caption_message))
+        self.assertTrue(asyncio.run(_should_answer_unsupported_media(caption_message, FakeBot())))
+        self.assertTrue(asyncio.run(_should_answer_unsupported_media(reply_message, FakeBot())))
+        self.assertIn("GIF/video", UNSUPPORTED_MEDIA_REPLY)
+
+    def test_animation_video_and_sticker_are_unsupported_media(self):
+        self.assertTrue(_is_unsupported_gif_or_video(fake_media_message(photo=False, animation=True)))
+        self.assertTrue(_is_unsupported_gif_or_video(fake_media_message(photo=False, video=True)))
+        self.assertTrue(_is_unsupported_gif_or_video(fake_media_message(photo=False, sticker=True)))
+
+    def test_supported_image_formats_go_to_vision_path(self):
+        self.assertTrue(_is_supported_image_message(fake_media_message(photo=True)))
+        self.assertTrue(_is_supported_image_message(fake_media_message(photo=False, document_mime_type="image/png")))
+        self.assertTrue(_is_supported_image_message(fake_media_message(photo=False, document_mime_type="image/jpeg")))
+        self.assertTrue(_is_supported_image_message(fake_media_message(photo=False, document_mime_type="image/webp")))
+        self.assertFalse(_is_supported_image_message(fake_media_message(photo=False, document_mime_type="image/gif")))
+        self.assertFalse(_is_unsupported_gif_or_video(fake_media_message(photo=False, document_mime_type="image/png")))
 
     def test_codmunity_success_skips_wzstats_fallback(self):
         client = object.__new__(CodmunityClient)
