@@ -61,7 +61,7 @@ deb javob beradi.
 
 ## Statistika
 
-Bot guruhlarda barcha xabarlarni sanaydi. Oddiy xabarlarga javob bermaydi; Lola bilan gaplashish uchun guruhda uning xabariga reply qilish kerak. Guruhdagi rasm/skrinshotlarga faqat botga reply qilinganda, captionda `@bot_username` yoki `Lola` yozilganda javob beradi. Oddiy replysiz/captionsiz rasmga asosiy guruhda ham javob bermaydi. Agar bot guruhdagi oddiy rasm update'larini umuman olmasa, BotFather orqali privacy mode'ni o'chiring: `/setprivacy` -> `Disable`. Statistika, memory va kunlik limitlar uchun PostgreSQL `DATABASE_URL` kerak. Private chat kuniga 10 ta, boshqa guruhlar kuniga 9 ta bepul bot javobidan foydalanadi. `MAIN_GROUP_ID` asosiy guruhni bepul qiladi.
+Bot guruhlarda barcha xabarlarni sanaydi. Oddiy xabarlarga javob bermaydi; Lola bilan gaplashish uchun guruhda uning xabariga reply qilish kerak. Guruhda faqat exact `Lola` chaqiruvi hardcoded javob qaytaradi; uzun gap ichida `Lola` tilga olinsa bot aralashmaydi. Guruhdagi rasm/skrinshotlarga botga reply qilinganda, captionda `@bot_username` yoki `Lola` yozilganda javob beradi. `MAIN_GROUP_ID` asosiy guruh bo'lsa, rasm/skrinshot vision ham ishlaydi, lekin oddiy matn chatda spam qilmaydi. Agar bot guruhdagi oddiy rasm update'larini umuman olmasa, BotFather orqali privacy mode'ni o'chiring: `/setprivacy` -> `Disable`. Statistika, memory va kunlik limitlar uchun PostgreSQL `DATABASE_URL` kerak. Private chat kuniga 10 ta, boshqa guruhlar kuniga 9 ta bepul bot javobidan foydalanadi. `MAIN_GROUP_ID` asosiy guruhni bepul qiladi.
 
 Buyruqlar:
 

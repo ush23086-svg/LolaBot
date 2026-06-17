@@ -5,9 +5,12 @@ from types import SimpleNamespace
 
 from app.handlers.common import (
     CHAT_DATA,
+    LOLA_WAKEUP_REPLY,
+    _is_exact_lola_wakeup,
     _safe_loadout_error,
     _should_handle_meta_list,
     _should_answer_media,
+    _should_answer_text,
     _meta_contexts,
     _meta_weapons_from_context,
     _reply_meta_weapons,
@@ -58,6 +61,17 @@ def fake_media_message(chat_type="group", chat_id=100, caption="", reply_from_us
         caption=caption,
         photo=[SimpleNamespace(file_id="photo")],
         document=None,
+        reply_to_message=reply,
+    )
+
+
+def fake_text_message(chat_type="group", chat_id=100, text="", reply_from_user_id=None):
+    reply = None
+    if reply_from_user_id is not None:
+        reply = SimpleNamespace(from_user=SimpleNamespace(id=reply_from_user_id))
+    return SimpleNamespace(
+        chat=SimpleNamespace(id=chat_id, type=chat_type),
+        text=text,
         reply_to_message=reply,
     )
 
@@ -206,13 +220,13 @@ class MetaSelectionTest(unittest.TestCase):
         self.assertEqual(requested_game("BR Ranked"), "ranked_unavailable")
         self.assertTrue(_should_handle_meta_list("Ranked", requested_game("Ranked")))
 
-    def test_group_media_ignores_plain_photo_even_in_main_group(self):
+    def test_group_media_allows_plain_photo_in_main_group(self):
         message = fake_media_message(chat_type="group", chat_id=100, caption="")
         settings = SimpleNamespace(main_group_id=100)
 
         allowed = asyncio.run(_should_answer_media(message, FakeBot(), settings))
 
-        self.assertFalse(allowed)
+        self.assertTrue(allowed)
 
     def test_group_media_allows_reply_to_bot_or_lola_caption(self):
         settings = SimpleNamespace(main_group_id=None)
@@ -234,6 +248,44 @@ class MetaSelectionTest(unittest.TestCase):
 
         self.assertTrue(reply_allowed)
         self.assertTrue(caption_allowed)
+
+    def test_exact_lola_wakeup_is_hardcoded(self):
+        self.assertTrue(_is_exact_lola_wakeup("Lola"))
+        self.assertTrue(_is_exact_lola_wakeup("Lola?"))
+        self.assertTrue(_is_exact_lola_wakeup("Lola 😊"))
+        self.assertEqual(LOLA_WAKEUP_REPLY, "Labbay, shu yerdaman 😊")
+
+    def test_lola_mentioned_in_sentence_is_not_group_wakeup(self):
+        message = fake_text_message(chat_type="group", text="Lola ishlayaptimi?")
+
+        allowed = asyncio.run(_should_answer_text(message, FakeBot()))
+
+        self.assertFalse(_is_exact_lola_wakeup(message.text))
+        self.assertFalse(allowed)
+
+    def test_reply_to_bot_continues_group_chat(self):
+        message = fake_text_message(
+            chat_type="group",
+            text="rasm ko'rasanmi?",
+            reply_from_user_id=999,
+        )
+
+        allowed = asyncio.run(_should_answer_text(message, FakeBot()))
+
+        self.assertTrue(allowed)
+
+    def test_private_lola_is_allowed(self):
+        message = fake_text_message(chat_type="private", text="Lola")
+
+        allowed = asyncio.run(_should_answer_text(message, FakeBot()))
+
+        self.assertTrue(_is_exact_lola_wakeup(message.text))
+        self.assertTrue(allowed)
+
+    def test_generic_support_reply_is_not_used_for_lola_wakeup(self):
+        self.assertNotIn("qanday yordam beray?", LOLA_WAKEUP_REPLY.lower())
+        self.assertNotIn("nima yordam kerak?", LOLA_WAKEUP_REPLY.lower())
+        self.assertNotIn("qanday yordam kerak?", LOLA_WAKEUP_REPLY.lower())
 
     def test_codmunity_success_skips_wzstats_fallback(self):
         client = object.__new__(CodmunityClient)

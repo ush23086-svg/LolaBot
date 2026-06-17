@@ -73,6 +73,7 @@ LOLA_PRESENCE_RE = re.compile(
     re.IGNORECASE,
 )
 PRESENCE_REPLIES = ["Xa, shu yerdaman 🙂", "Eshitaman.", "Shu yerdaman."]
+LOLA_WAKEUP_REPLY = "Labbay, shu yerdaman 😊"
 MEMORY_RE = re.compile(
     r"(kecha|oldin|avval).*(nima|gaplash|yozish)|nimani gaplashdik",
     re.IGNORECASE,
@@ -129,15 +130,73 @@ def _greeting_for(message: Message) -> str:
     return f"Salom, {name} 😊"
 
 
-async def _should_answer(message: Message, bot: Bot) -> bool:
-    if message.chat.type == "private":
-        return True
+def _is_exact_lola_wakeup(text: str) -> bool:
+    return normalize_text(text) == "lola"
 
+
+def _mentions_lola(text: str) -> bool:
+    return "lola" in normalize_text(text)
+
+
+async def _is_reply_to_bot(message: Message, bot: Bot) -> bool:
     if not message.reply_to_message or not message.reply_to_message.from_user:
         return False
 
     me = await bot.me()
     return message.reply_to_message.from_user.id == me.id
+
+
+async def _should_answer(message: Message, bot: Bot) -> bool:
+    if message.chat.type == "private":
+        return True
+
+    return await _is_reply_to_bot(message, bot)
+
+
+async def _should_answer_text(message: Message, bot: Bot) -> bool:
+    if message.chat.type == "private":
+        return True
+
+    me = await bot.me()
+    is_reply_to_bot = bool(
+        message.reply_to_message
+        and message.reply_to_message.from_user
+        and message.reply_to_message.from_user.id == me.id
+    )
+    bot_username = (me.username or "").lower()
+    text = message.text or ""
+    mentioned_bot = bool(bot_username and f"@{bot_username}" in text.lower())
+
+    if is_reply_to_bot:
+        logger.info(
+            "text_handler_decision chat_type=%s chat_id=%s reason=reply_to_bot_continue",
+            message.chat.type,
+            message.chat.id,
+        )
+        return True
+
+    if mentioned_bot:
+        logger.info(
+            "text_handler_decision chat_type=%s chat_id=%s reason=bot_mentioned_continue",
+            message.chat.type,
+            message.chat.id,
+        )
+        return True
+
+    if _mentions_lola(text):
+        logger.info(
+            "text_handler_decision chat_type=%s chat_id=%s reason=ignored_lola_mentioned_in_sentence",
+            message.chat.type,
+            message.chat.id,
+        )
+        return False
+
+    logger.info(
+        "text_handler_decision chat_type=%s chat_id=%s reason=ignored_not_addressed",
+        message.chat.type,
+        message.chat.id,
+    )
+    return False
 
 
 async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -> bool:
@@ -163,8 +222,10 @@ async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -
     mentioned_bot = bool(bot_username and f"@{bot_username}" in caption.lower())
     mentions_lola = "lola" in normalize_text(caption)
     is_main_group = bool(settings.main_group_id is not None and int(message.chat.id) == int(settings.main_group_id))
-    allowed = is_reply_to_bot or mentioned_bot or mentions_lola
-    if is_reply_to_bot:
+    allowed = is_reply_to_bot or mentioned_bot or mentions_lola or is_main_group
+    if is_main_group:
+        reason = "main_group"
+    elif is_reply_to_bot:
         reason = "reply_to_bot"
     elif mentioned_bot:
         reason = "bot_mentioned"
@@ -1083,7 +1144,17 @@ async def text_handler(
         await _send_video_reply(message, VIDEO_SONG2_FILENAME)
         return
 
-    if not await _should_answer(message, bot):
+    if _is_exact_lola_wakeup(text):
+        if message.chat.type != "private":
+            logger.info(
+                "text_handler_decision chat_type=%s chat_id=%s reason=group_wakeup_exact_lola",
+                message.chat.type,
+                message.chat.id,
+            )
+        await message.reply(LOLA_WAKEUP_REPLY)
+        return
+
+    if not await _should_answer_text(message, bot):
         return
     if not await _check_usage_limit(message, stats_service):
         return
