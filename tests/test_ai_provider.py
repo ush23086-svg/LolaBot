@@ -8,6 +8,7 @@ from app.config import (
 )
 from app.services.ai_provider import OpenRouterProvider
 from app.services.ai_provider import _sanitize_user_name_leak
+from app.services.ai_provider import _strip_markdown_emphasis
 
 
 class FakeResponse:
@@ -268,6 +269,12 @@ class ModelConfigTest(unittest.TestCase):
         self.assertEqual(
             _sanitize_user_name_leak("Jasur, ko'rdim.", ""),
             "ko'rdim.",
+        )
+
+    def test_strip_markdown_emphasis_from_image_answer(self):
+        self.assertEqual(
+            _strip_markdown_emphasis("Bu **game screenshot** ko'rinadi ***"),
+            "Bu game screenshot ko'rinadi ",
         )
 
 

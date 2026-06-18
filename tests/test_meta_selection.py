@@ -69,6 +69,8 @@ def fake_media_message(
     animation=False,
     video=False,
     sticker=False,
+    sender_chat=False,
+    forward_from_chat=False,
 ):
     reply = None
     if reply_from_user_id is not None:
@@ -84,6 +86,8 @@ def fake_media_message(
         animation=SimpleNamespace(file_id="animation", mime_type="image/gif") if animation else None,
         video=SimpleNamespace(file_id="video", mime_type="video/mp4") if video else None,
         sticker=SimpleNamespace(file_id="sticker") if sticker else None,
+        sender_chat=SimpleNamespace(id=-100200, type="channel") if sender_chat else None,
+        forward_from_chat=SimpleNamespace(id=-100300, type="channel") if forward_from_chat else None,
         reply_to_message=reply,
     )
 
@@ -254,13 +258,34 @@ class MetaSelectionTest(unittest.TestCase):
         self.assertEqual(requested_game("BR Ranked"), "ranked_unavailable")
         self.assertTrue(_should_handle_meta_list("Ranked", requested_game("Ranked")))
 
-    def test_group_media_allows_plain_photo_in_main_group(self):
+    def test_main_group_media_ignores_plain_photo(self):
         message = fake_media_message(chat_type="group", chat_id=100, caption="")
         settings = SimpleNamespace(main_group_id=100)
 
         allowed = asyncio.run(_should_answer_media(message, FakeBot(), settings))
 
-        self.assertTrue(allowed)
+        self.assertFalse(allowed)
+
+    def test_main_group_media_ignores_channel_or_sender_chat_photo(self):
+        settings = SimpleNamespace(main_group_id=100)
+
+        channel_allowed = asyncio.run(
+            _should_answer_media(
+                fake_media_message(chat_type="group", chat_id=100, forward_from_chat=True),
+                FakeBot(),
+                settings,
+            )
+        )
+        sender_chat_allowed = asyncio.run(
+            _should_answer_media(
+                fake_media_message(chat_type="group", chat_id=100, sender_chat=True),
+                FakeBot(),
+                settings,
+            )
+        )
+
+        self.assertFalse(channel_allowed)
+        self.assertFalse(sender_chat_allowed)
 
     def test_main_group_media_ignores_reply_to_human(self):
         message = fake_media_message(
@@ -273,6 +298,14 @@ class MetaSelectionTest(unittest.TestCase):
         allowed = asyncio.run(_should_answer_media(message, FakeBot(), settings))
 
         self.assertFalse(allowed)
+
+    def test_private_media_allows_photo(self):
+        message = fake_media_message(chat_type="private", chat_id=200, caption="")
+        settings = SimpleNamespace(main_group_id=100)
+
+        allowed = asyncio.run(_should_answer_media(message, FakeBot(), settings))
+
+        self.assertTrue(allowed)
 
     def test_main_group_media_allows_reply_to_bot_or_lola_caption(self):
         settings = SimpleNamespace(main_group_id=100)
@@ -291,9 +324,17 @@ class MetaSelectionTest(unittest.TestCase):
                 settings,
             )
         )
+        mention_allowed = asyncio.run(
+            _should_answer_media(
+                fake_media_message(chat_type="group", chat_id=100, caption="@LolaBot nima bu?"),
+                FakeBot(),
+                settings,
+            )
+        )
 
         self.assertTrue(reply_allowed)
         self.assertTrue(caption_allowed)
+        self.assertTrue(mention_allowed)
 
     def test_user_label_uses_current_telegram_sender_only(self):
         self.assertEqual(_user_label(fake_user_message(user_id=777, first_name="Jasur")), "Jasur")

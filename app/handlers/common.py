@@ -235,6 +235,28 @@ async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -
         )
         return True
 
+    if getattr(message, "sender_chat", None):
+        _log_media_decision(
+            message,
+            is_main_group=_is_main_group_message(message, settings),
+            is_reply_to_bot=False,
+            mentioned_bot=False,
+            allowed=False,
+            reason="ignored_sender_chat",
+        )
+        return False
+
+    if _is_channel_post_message(message):
+        _log_media_decision(
+            message,
+            is_main_group=_is_main_group_message(message, settings),
+            is_reply_to_bot=False,
+            mentioned_bot=False,
+            allowed=False,
+            reason="ignored_channel_post",
+        )
+        return False
+
     me = await bot.me()
     bot_username = (me.username or "").lower()
     caption = message.caption or ""
@@ -250,27 +272,23 @@ async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -
     )
     mentioned_bot = bool(bot_username and f"@{bot_username}" in caption.lower())
     mentions_lola = "lola" in normalize_text(caption)
-    is_main_group = bool(settings.main_group_id is not None and int(message.chat.id) == int(settings.main_group_id))
-    is_standalone = not message.reply_to_message
+    is_main_group = _is_main_group_message(message, settings)
 
     if is_reply_to_bot:
         allowed = True
-        reason = "reply_to_bot"
+        reason = "allowed_reply_to_bot"
     elif mentioned_bot:
         allowed = True
-        reason = "bot_mentioned"
+        reason = "allowed_bot_mention"
     elif mentions_lola:
         allowed = True
-        reason = "caption_lola"
+        reason = "allowed_caption_lola"
     elif is_reply_to_human:
         allowed = False
         reason = "ignored_reply_to_human"
-    elif is_main_group and is_standalone:
-        allowed = True
-        reason = "main_group_standalone_photo"
     else:
         allowed = False
-        reason = "ignored_not_addressed"
+        reason = "ignored_standalone_group_photo"
 
     _log_media_decision(
         message,
@@ -281,6 +299,15 @@ async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -
         reason=reason,
     )
     return allowed
+
+
+def _is_main_group_message(message: Message, settings: Settings) -> bool:
+    return bool(settings.main_group_id is not None and int(message.chat.id) == int(settings.main_group_id))
+
+
+def _is_channel_post_message(message: Message) -> bool:
+    chat_type = getattr(message.chat, "type", "")
+    return chat_type == "channel" or bool(getattr(message, "forward_from_chat", None))
 
 
 def _media_content_type(message: Message) -> str:
