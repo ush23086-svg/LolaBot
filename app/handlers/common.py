@@ -119,17 +119,15 @@ META_ACTION_MARKERS = (
 )
 
 
-def _user_label(message: Message, settings: Settings | None = None) -> str:
+def _user_label(message: Message) -> str:
     user = message.from_user
     if not user:
-        return "foydalanuvchi"
-    if settings and settings.owner_id and user.id == settings.owner_id:
-        return "iKO/Jasur"
+        return ""
     return (
         getattr(user, "first_name", None)
         or getattr(user, "username", None)
         or getattr(user, "full_name", None)
-        or "foydalanuvchi"
+        or ""
     )
 
 
@@ -1166,7 +1164,6 @@ async def image_command_handler(
     message: Message,
     ai_provider: AIProvider,
     stats_service: StatsService,
-    settings: Settings,
 ) -> None:
     prompt = (message.text or "").partition(" ")[2].strip()
     if not prompt:
@@ -1177,7 +1174,7 @@ async def image_command_handler(
 
     status = await message.reply("Rasm yaratyapman...")
     try:
-        result = await ai_provider.generate_image(prompt=prompt, user_name=_user_label(message, settings))
+        result = await ai_provider.generate_image(prompt=prompt, user_name=_user_label(message))
         if result.data:
             await message.reply_photo(
                 BufferedInputFile(result.data, filename="lola_image.png"),
@@ -1283,7 +1280,7 @@ async def _handle_image_message(
 
         answer = await ai_provider.analyze_image(
             image_base64=image_base64,
-            user_name=_user_label(message, settings),
+            user_name=_user_label(message),
             caption=message.caption or "",
             reply_context=_reply_context(message),
         )
@@ -1301,7 +1298,6 @@ async def text_handler(
     ai_provider: AIProvider,
     codmunity_client: CodmunityClient,
     stats_service: StatsService,
-    settings: Settings,
 ) -> None:
     text = message.text or ""
     if not text.strip():
@@ -1387,7 +1383,7 @@ async def text_handler(
     try:
         answer = await ai_provider.ask_ai(
             text=text,
-            user_name=_user_label(message, settings),
+            user_name=_user_label(message),
             reply_context=_reply_context(message),
         )
         await _send_answer(message, answer)

@@ -37,10 +37,13 @@ Asosiy qoidalar:
 - Foydalanuvchi ruscha, inglizcha yoki boshqa tilda yozib berishni so'rasa, aynan o'sha tilda javob ber.
 - O'zingni ChatGPT deb emas, Lola deb bil.
 - Juda rasmiy bo'lma; odamga o'xshab tabiiy gapir.
-- Har bir javobda aynan shu xabarning "Foydalanuvchi Telegram nomi" maydonidagi odam bilan gaplashayotganingni unutma.
-- User ismini taxmin qilma va bir userning ismini boshqa userga yopishtirma.
-- Userga ism bilan murojaat qilsang, faqat berilgan Telegram nomidan foydalan. Nom kerak bo'lmasa umuman ism ishlatma.
-- "Foydalanuvchi Telegram nomi: iKO/Jasur" bo'lsa, bu egang iKO/Jasur ekanini bil.
+- Do not guess the user's name.
+- Do not address the current user by a name from another message.
+- Use display_name only if it belongs to the current Telegram sender.
+- Do not mention the user's name in every reply.
+- If unsure, avoid using any name.
+- Reply qilingan xabardagi odam current user emas; current user faqat hozirgi Telegram sender.
+- "Shaxboz", "iKO", "Jasur", "Sanjar" kabi ism/nicklarni o'zingdan qo'shma.
 - Har javob oxirida generic yordam takliflarini qo'shaverma.
 - Faqat user savoli noaniq bo'lsa yoki yordam so'rasa, bitta qisqa aniqlashtiruvchi savol ber.
 - User oddiy kayfiyat yoki kundalik gap yozsa, tabiiy reaksiya qil: masalan "kayfiyat zo'r" desa "Zo'r, shunaqa kayfiyat ketaversin 😄" kabi.
@@ -148,10 +151,13 @@ class OpenRouterProvider(AIProvider):
         self._key_cooldowns: dict[tuple[str, int, str], tuple[float, str]] = {}
 
     async def ask_ai(self, text: str, user_name: str, reply_context: str = "") -> str:
+        display_name = user_name.strip() or "(none)"
         user_content = (
-            f"Foydalanuvchi Telegram nomi: {user_name}\n"
-            "Ism qoidasi: javobda userga murojaat qilsang faqat shu nomdan foydalan; "
-            "boshqa odam ismini ishlatma.\n"
+            f"current_sender_display_name: {display_name}\n"
+            "Identity rule: this display_name belongs only to the current Telegram sender. "
+            "Do not use names from reply context or chat history as the current user's name. "
+            "If display_name is (none), do not address the user by any name. "
+            "Using the name is optional; most replies can be name-free.\n"
         )
         if reply_context:
             user_content += f"{reply_context}\n"
@@ -890,20 +896,25 @@ def _has_text_content(data: Any) -> bool:
 
 def _sanitize_user_name_leak(content: str, user_name: str) -> str:
     clean_name = (user_name or "").strip()
-    if not clean_name:
-        return content
-
-    normalized_name = clean_name.lower()
-    if "shaxboz" in normalized_name or "shahboz" in normalized_name:
-        return content
+    normalized_name = _normalize_identity_name(clean_name)
 
     return re.sub(
-        r"^(\s*(?:salom,\s*)?)(shaxboz|shahboz)(\b[\s,!.:-]*)",
-        lambda match: f"{match.group(1)}{clean_name}{match.group(3)}",
+        r"^(\s*(?:salom,\s*)?)(shaxboz|shahboz|iko|jasur|sanjar)(\b[\s,!.:-]*)",
+        lambda match: (
+            match.group(0)
+            if _normalize_identity_name(match.group(2)) == normalized_name
+            else f"{match.group(1)}{clean_name}{match.group(3)}"
+            if clean_name
+            else match.group(1)
+        ),
         content,
         count=1,
         flags=re.IGNORECASE,
     )
+
+
+def _normalize_identity_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
 
 
 def _vision_probe_understood(data: Any) -> bool:

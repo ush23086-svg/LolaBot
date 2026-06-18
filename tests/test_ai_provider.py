@@ -252,14 +252,22 @@ class ModelConfigTest(unittest.TestCase):
             [OPENROUTER_DEFAULT_FALLBACK_MODEL, OPENROUTER_DEFAULT_REASONING_MODEL],
         )
 
-    def test_sanitize_wrong_shaxboz_salutation(self):
+    def test_sanitize_wrong_name_salutation(self):
         self.assertEqual(
-            _sanitize_user_name_leak("Shaxboz, tushunarli.", "iKO/Jasur"),
-            "iKO/Jasur, tushunarli.",
+            _sanitize_user_name_leak("Shaxboz, tushunarli.", "iKO"),
+            "iKO, tushunarli.",
         )
         self.assertEqual(
             _sanitize_user_name_leak("Shaxboz, tushunarli.", "Shaxboz"),
             "Shaxboz, tushunarli.",
+        )
+        self.assertEqual(
+            _sanitize_user_name_leak("iKO, bo'ldi.", "Sanjar"),
+            "Sanjar, bo'ldi.",
+        )
+        self.assertEqual(
+            _sanitize_user_name_leak("Jasur, ko'rdim.", ""),
+            "ko'rdim.",
         )
 
 

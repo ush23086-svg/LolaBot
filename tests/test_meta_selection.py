@@ -295,12 +295,22 @@ class MetaSelectionTest(unittest.TestCase):
         self.assertTrue(reply_allowed)
         self.assertTrue(caption_allowed)
 
-    def test_user_label_uses_owner_or_telegram_name(self):
-        owner_settings = SimpleNamespace(owner_id=777)
+    def test_user_label_uses_current_telegram_sender_only(self):
+        self.assertEqual(_user_label(fake_user_message(user_id=777, first_name="Jasur")), "Jasur")
+        self.assertEqual(_user_label(fake_user_message(user_id=2, first_name="Shaxboz")), "Shaxboz")
+        self.assertEqual(_user_label(fake_user_message(user_id=3, username="other_user")), "other_user")
+        self.assertEqual(_user_label(fake_user_message(user_id=4)), "")
 
-        self.assertEqual(_user_label(fake_user_message(user_id=777, first_name="Jasur"), owner_settings), "iKO/Jasur")
-        self.assertEqual(_user_label(fake_user_message(user_id=2, first_name="Shaxboz"), owner_settings), "Shaxboz")
-        self.assertEqual(_user_label(fake_user_message(user_id=3, username="other_user"), owner_settings), "other_user")
+    def test_user_label_does_not_mix_multiple_senders(self):
+        users = [
+            fake_user_message(user_id=1, first_name="Shaxboz"),
+            fake_user_message(user_id=2, first_name="iKO"),
+            fake_user_message(user_id=3, first_name="Sanjar"),
+            fake_user_message(user_id=4, username="cod_user"),
+            fake_user_message(user_id=5, first_name="Ali"),
+        ]
+
+        self.assertEqual([_user_label(user) for user in users], ["Shaxboz", "iKO", "Sanjar", "cod_user", "Ali"])
 
     def test_exact_lola_wakeup_is_random_reply_eligible(self):
         self.assertTrue(_is_exact_lola_wakeup("Lola"))
