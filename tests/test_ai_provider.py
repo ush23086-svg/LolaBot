@@ -7,6 +7,7 @@ from app.config import (
     _clean_models,
 )
 from app.services.ai_provider import OpenRouterProvider
+from app.services.ai_provider import _sanitize_user_name_leak
 
 
 class FakeResponse:
@@ -249,6 +250,16 @@ class ModelConfigTest(unittest.TestCase):
         self.assertEqual(
             models,
             [OPENROUTER_DEFAULT_FALLBACK_MODEL, OPENROUTER_DEFAULT_REASONING_MODEL],
+        )
+
+    def test_sanitize_wrong_shaxboz_salutation(self):
+        self.assertEqual(
+            _sanitize_user_name_leak("Shaxboz, tushunarli.", "iKO/Jasur"),
+            "iKO/Jasur, tushunarli.",
+        )
+        self.assertEqual(
+            _sanitize_user_name_leak("Shaxboz, tushunarli.", "Shaxboz"),
+            "Shaxboz, tushunarli.",
         )
 
 

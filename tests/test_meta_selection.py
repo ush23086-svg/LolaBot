@@ -16,6 +16,7 @@ from app.handlers.common import (
     _should_answer_media,
     _should_answer_unsupported_media,
     _should_answer_text,
+    _user_label,
     _meta_contexts,
     _meta_weapons_from_context,
     _reply_meta_weapons,
@@ -95,6 +96,17 @@ def fake_text_message(chat_type="group", chat_id=100, text="", reply_from_user_i
         chat=SimpleNamespace(id=chat_id, type=chat_type),
         text=text,
         reply_to_message=reply,
+    )
+
+
+def fake_user_message(user_id=1, first_name=None, username=None, full_name=None):
+    return SimpleNamespace(
+        from_user=SimpleNamespace(
+            id=user_id,
+            first_name=first_name,
+            username=username,
+            full_name=full_name,
+        )
     )
 
 
@@ -250,19 +262,31 @@ class MetaSelectionTest(unittest.TestCase):
 
         self.assertTrue(allowed)
 
-    def test_group_media_allows_reply_to_bot_or_lola_caption(self):
-        settings = SimpleNamespace(main_group_id=None)
+    def test_main_group_media_ignores_reply_to_human(self):
+        message = fake_media_message(
+            chat_type="group",
+            chat_id=100,
+            reply_from_user_id=123,
+        )
+        settings = SimpleNamespace(main_group_id=100)
+
+        allowed = asyncio.run(_should_answer_media(message, FakeBot(), settings))
+
+        self.assertFalse(allowed)
+
+    def test_main_group_media_allows_reply_to_bot_or_lola_caption(self):
+        settings = SimpleNamespace(main_group_id=100)
 
         reply_allowed = asyncio.run(
             _should_answer_media(
-                fake_media_message(chat_type="group", reply_from_user_id=999),
+                fake_media_message(chat_type="group", chat_id=100, reply_from_user_id=999),
                 FakeBot(),
                 settings,
             )
         )
         caption_allowed = asyncio.run(
             _should_answer_media(
-                fake_media_message(chat_type="group", caption="Lola, buni ko'r"),
+                fake_media_message(chat_type="group", chat_id=100, caption="Lola nima bu?"),
                 FakeBot(),
                 settings,
             )
@@ -270,6 +294,13 @@ class MetaSelectionTest(unittest.TestCase):
 
         self.assertTrue(reply_allowed)
         self.assertTrue(caption_allowed)
+
+    def test_user_label_uses_owner_or_telegram_name(self):
+        owner_settings = SimpleNamespace(owner_id=777)
+
+        self.assertEqual(_user_label(fake_user_message(user_id=777, first_name="Jasur"), owner_settings), "iKO/Jasur")
+        self.assertEqual(_user_label(fake_user_message(user_id=2, first_name="Shaxboz"), owner_settings), "Shaxboz")
+        self.assertEqual(_user_label(fake_user_message(user_id=3, username="other_user"), owner_settings), "other_user")
 
     def test_exact_lola_wakeup_is_random_reply_eligible(self):
         self.assertTrue(_is_exact_lola_wakeup("Lola"))

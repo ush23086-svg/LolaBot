@@ -37,6 +37,10 @@ Asosiy qoidalar:
 - Foydalanuvchi ruscha, inglizcha yoki boshqa tilda yozib berishni so'rasa, aynan o'sha tilda javob ber.
 - O'zingni ChatGPT deb emas, Lola deb bil.
 - Juda rasmiy bo'lma; odamga o'xshab tabiiy gapir.
+- Har bir javobda aynan shu xabarning "Foydalanuvchi Telegram nomi" maydonidagi odam bilan gaplashayotganingni unutma.
+- User ismini taxmin qilma va bir userning ismini boshqa userga yopishtirma.
+- Userga ism bilan murojaat qilsang, faqat berilgan Telegram nomidan foydalan. Nom kerak bo'lmasa umuman ism ishlatma.
+- "Foydalanuvchi Telegram nomi: iKO/Jasur" bo'lsa, bu egang iKO/Jasur ekanini bil.
 - Har javob oxirida generic yordam takliflarini qo'shaverma.
 - Faqat user savoli noaniq bo'lsa yoki yordam so'rasa, bitta qisqa aniqlashtiruvchi savol ber.
 - User oddiy kayfiyat yoki kundalik gap yozsa, tabiiy reaksiya qil: masalan "kayfiyat zo'r" desa "Zo'r, shunaqa kayfiyat ketaversin 😄" kabi.
@@ -144,7 +148,11 @@ class OpenRouterProvider(AIProvider):
         self._key_cooldowns: dict[tuple[str, int, str], tuple[float, str]] = {}
 
     async def ask_ai(self, text: str, user_name: str, reply_context: str = "") -> str:
-        user_content = f"Foydalanuvchi: {user_name}\n"
+        user_content = (
+            f"Foydalanuvchi Telegram nomi: {user_name}\n"
+            "Ism qoidasi: javobda userga murojaat qilsang faqat shu nomdan foydalan; "
+            "boshqa odam ismini ishlatma.\n"
+        )
         if reply_context:
             user_content += f"{reply_context}\n"
         user_content += f"Xabar: {text}"
@@ -164,8 +172,9 @@ class OpenRouterProvider(AIProvider):
                 payload,
                 self.reasoning_models or self.models,
                 operation="reasoning",
+                user_name=user_name,
             )
-        return await self._chat_completion(payload, self.models, operation="chat")
+        return await self._chat_completion(payload, self.models, operation="chat", user_name=user_name)
 
     async def analyze_image(
         self,
@@ -212,7 +221,12 @@ class OpenRouterProvider(AIProvider):
             "temperature": 0.4,
             "max_tokens": 900,
         }
-        return await self._chat_completion(payload, self._image_models(), operation="vision")
+        return await self._chat_completion(
+            payload,
+            self._image_models(),
+            operation="vision",
+            user_name=user_name,
+        )
 
     def _image_models(self) -> list[str]:
         return self.vision_models
@@ -387,7 +401,13 @@ class OpenRouterProvider(AIProvider):
         return status
 
 
-    async def _chat_completion(self, payload: dict, models: list[str], operation: str) -> str:
+    async def _chat_completion(
+        self,
+        payload: dict,
+        models: list[str],
+        operation: str,
+        user_name: str = "",
+    ) -> str:
         data = await self._completion_data(
             payload,
             models,
@@ -406,7 +426,7 @@ class OpenRouterProvider(AIProvider):
         if not content:
             return AI_ERROR_MESSAGE
 
-        return content.strip()
+        return _sanitize_user_name_leak(content.strip(), user_name)
 
     async def _completion_data(
         self,
@@ -866,6 +886,24 @@ def _has_text_content(data: Any) -> bool:
     except (KeyError, IndexError, TypeError):
         return False
     return bool(content)
+
+
+def _sanitize_user_name_leak(content: str, user_name: str) -> str:
+    clean_name = (user_name or "").strip()
+    if not clean_name:
+        return content
+
+    normalized_name = clean_name.lower()
+    if "shaxboz" in normalized_name or "shahboz" in normalized_name:
+        return content
+
+    return re.sub(
+        r"^(\s*(?:salom,\s*)?)(shaxboz|shahboz)(\b[\s,!.:-]*)",
+        lambda match: f"{match.group(1)}{clean_name}{match.group(3)}",
+        content,
+        count=1,
+        flags=re.IGNORECASE,
+    )
 
 
 def _vision_probe_understood(data: Any) -> bool:

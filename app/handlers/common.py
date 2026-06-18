@@ -119,11 +119,18 @@ META_ACTION_MARKERS = (
 )
 
 
-def _user_label(message: Message) -> str:
+def _user_label(message: Message, settings: Settings | None = None) -> str:
     user = message.from_user
     if not user:
         return "foydalanuvchi"
-    return user.full_name or user.username or "foydalanuvchi"
+    if settings and settings.owner_id and user.id == settings.owner_id:
+        return "iKO/Jasur"
+    return (
+        getattr(user, "first_name", None)
+        or getattr(user, "username", None)
+        or getattr(user, "full_name", None)
+        or "foydalanuvchi"
+    )
 
 
 def _user_display_name(message: Message) -> str:
@@ -238,19 +245,33 @@ async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -
         and message.reply_to_message.from_user
         and message.reply_to_message.from_user.id == me.id
     )
+    is_reply_to_human = bool(
+        message.reply_to_message
+        and message.reply_to_message.from_user
+        and message.reply_to_message.from_user.id != me.id
+    )
     mentioned_bot = bool(bot_username and f"@{bot_username}" in caption.lower())
     mentions_lola = "lola" in normalize_text(caption)
     is_main_group = bool(settings.main_group_id is not None and int(message.chat.id) == int(settings.main_group_id))
-    allowed = is_reply_to_bot or mentioned_bot or mentions_lola or is_main_group
-    if is_main_group:
-        reason = "main_group"
-    elif is_reply_to_bot:
+    is_standalone = not message.reply_to_message
+
+    if is_reply_to_bot:
+        allowed = True
         reason = "reply_to_bot"
     elif mentioned_bot:
+        allowed = True
         reason = "bot_mentioned"
     elif mentions_lola:
+        allowed = True
         reason = "caption_lola"
+    elif is_reply_to_human:
+        allowed = False
+        reason = "ignored_reply_to_human"
+    elif is_main_group and is_standalone:
+        allowed = True
+        reason = "main_group_standalone_photo"
     else:
+        allowed = False
         reason = "ignored_not_addressed"
 
     _log_media_decision(
@@ -1145,6 +1166,7 @@ async def image_command_handler(
     message: Message,
     ai_provider: AIProvider,
     stats_service: StatsService,
+    settings: Settings,
 ) -> None:
     prompt = (message.text or "").partition(" ")[2].strip()
     if not prompt:
@@ -1155,7 +1177,7 @@ async def image_command_handler(
 
     status = await message.reply("Rasm yaratyapman...")
     try:
-        result = await ai_provider.generate_image(prompt=prompt, user_name=_user_label(message))
+        result = await ai_provider.generate_image(prompt=prompt, user_name=_user_label(message, settings))
         if result.data:
             await message.reply_photo(
                 BufferedInputFile(result.data, filename="lola_image.png"),
@@ -1261,7 +1283,7 @@ async def _handle_image_message(
 
         answer = await ai_provider.analyze_image(
             image_base64=image_base64,
-            user_name=_user_label(message),
+            user_name=_user_label(message, settings),
             caption=message.caption or "",
             reply_context=_reply_context(message),
         )
@@ -1279,6 +1301,7 @@ async def text_handler(
     ai_provider: AIProvider,
     codmunity_client: CodmunityClient,
     stats_service: StatsService,
+    settings: Settings,
 ) -> None:
     text = message.text or ""
     if not text.strip():
@@ -1364,7 +1387,7 @@ async def text_handler(
     try:
         answer = await ai_provider.ask_ai(
             text=text,
-            user_name=_user_label(message),
+            user_name=_user_label(message, settings),
             reply_context=_reply_context(message),
         )
         await _send_answer(message, answer)

@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     openrouter_model_1: str | None = Field(default=None, alias="OPENROUTER_MODEL_1")
     openrouter_model_2: str | None = Field(default=None, alias="OPENROUTER_MODEL_2")
     openrouter_model_3: str | None = Field(default=None, alias="OPENROUTER_MODEL_3")
+    openrouter_model_4: str | None = Field(default=None, alias="OPENROUTER_MODEL_4")
+    openrouter_model_5: str | None = Field(default=None, alias="OPENROUTER_MODEL_5")
     openrouter_vision_model_1: str | None = Field(
         default=None,
         alias="OPENROUTER_VISION_MODEL_1",
@@ -105,6 +107,8 @@ class Settings(BaseSettings):
             self.openrouter_model_1,
             self.openrouter_model_2,
             self.openrouter_model_3,
+            self.openrouter_model_4,
+            self.openrouter_model_5,
             self.openrouter_model,
         ]
         return _clean_models(models + legacy_models) or [
