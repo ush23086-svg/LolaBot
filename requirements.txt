@@ -1,6 +1,7 @@
 aiogram==3.13.1
 aiohttp==3.10.11
 beautifulsoup4==4.12.3
+imageio-ffmpeg==0.5.1
 python-dotenv==1.0.1
 pydantic-settings==2.7.0
 psycopg2-binary==2.9.10

@@ -8,8 +8,11 @@ from app.handlers.common import (
     LOLA_WAKEUP_REPLIES,
     UNSUPPORTED_MEDIA_REPLY,
     _is_unsupported_gif_or_video,
+    _is_visual_media_message,
     _is_supported_image_message,
     _is_exact_lola_wakeup,
+    _forced_style_reply,
+    _media_file_id,
     _lola_wakeup_reply,
     _safe_loadout_error,
     _should_handle_meta_list,
@@ -68,6 +71,7 @@ def fake_media_message(
     document_mime_type=None,
     animation=False,
     video=False,
+    video_note=False,
     sticker=False,
     sender_chat=False,
     forward_from_chat=False,
@@ -85,6 +89,7 @@ def fake_media_message(
         document=document,
         animation=SimpleNamespace(file_id="animation", mime_type="image/gif") if animation else None,
         video=SimpleNamespace(file_id="video", mime_type="video/mp4") if video else None,
+        video_note=SimpleNamespace(file_id="video-note") if video_note else None,
         sticker=SimpleNamespace(file_id="sticker") if sticker else None,
         sender_chat=SimpleNamespace(id=-100200, type="channel") if sender_chat else None,
         forward_from_chat=SimpleNamespace(id=-100300, type="channel") if forward_from_chat else None,
@@ -307,7 +312,7 @@ class MetaSelectionTest(unittest.TestCase):
 
         self.assertTrue(allowed)
 
-    def test_main_group_media_allows_reply_to_bot_or_lola_caption(self):
+    def test_main_group_media_allows_reply_to_bot_or_bot_mention(self):
         settings = SimpleNamespace(main_group_id=100)
 
         reply_allowed = asyncio.run(
@@ -317,7 +322,7 @@ class MetaSelectionTest(unittest.TestCase):
                 settings,
             )
         )
-        caption_allowed = asyncio.run(
+        lola_caption_allowed = asyncio.run(
             _should_answer_media(
                 fake_media_message(chat_type="group", chat_id=100, caption="Lola nima bu?"),
                 FakeBot(),
@@ -333,7 +338,7 @@ class MetaSelectionTest(unittest.TestCase):
         )
 
         self.assertTrue(reply_allowed)
-        self.assertTrue(caption_allowed)
+        self.assertFalse(lola_caption_allowed)
         self.assertTrue(mention_allowed)
 
     def test_user_label_uses_current_telegram_sender_only(self):
@@ -403,6 +408,12 @@ class MetaSelectionTest(unittest.TestCase):
             self.assertNotIn("nima yordam kerak?", lowered)
             self.assertNotIn("qanday yordam kerak?", lowered)
 
+    def test_forced_style_reply_handles_sensirash_requests(self):
+        self.assertEqual(_forced_style_reply("Lola sensirash kerakmas"), "Voy, uzr 😂 Mayli, sizlab gapiraman.")
+        self.assertEqual(_forced_style_reply("senlama"), "Voy, uzr 😂 Mayli, sizlab gapiraman.")
+        self.assertEqual(_forced_style_reply("sizlab gapir"), "Voy, uzr 😂 Mayli, sizlab gapiraman.")
+        self.assertIsNone(_forced_style_reply("sensor narxi qancha?"))
+
     def test_group_plain_gif_is_ignored(self):
         message = fake_media_message(
             chat_type="group",
@@ -415,10 +426,10 @@ class MetaSelectionTest(unittest.TestCase):
 
         self.assertFalse(allowed)
 
-    def test_group_addressed_gif_gets_polite_unsupported_reply_path(self):
+    def test_group_addressed_gif_gets_visual_media_path(self):
         caption_message = fake_media_message(
             chat_type="group",
-            caption="Lola",
+            caption="@LolaBot nima bu?",
             photo=False,
             document_mime_type="image/gif",
         )
@@ -432,12 +443,17 @@ class MetaSelectionTest(unittest.TestCase):
         self.assertTrue(_is_unsupported_gif_or_video(caption_message))
         self.assertTrue(asyncio.run(_should_answer_unsupported_media(caption_message, FakeBot())))
         self.assertTrue(asyncio.run(_should_answer_unsupported_media(reply_message, FakeBot())))
-        self.assertIn("GIF/video", UNSUPPORTED_MEDIA_REPLY)
+        self.assertIn("Buni aniq tushunmadim", UNSUPPORTED_MEDIA_REPLY)
 
-    def test_animation_video_and_sticker_are_unsupported_media(self):
+    def test_animation_video_video_note_and_sticker_are_visual_media(self):
         self.assertTrue(_is_unsupported_gif_or_video(fake_media_message(photo=False, animation=True)))
         self.assertTrue(_is_unsupported_gif_or_video(fake_media_message(photo=False, video=True)))
+        self.assertTrue(_is_unsupported_gif_or_video(fake_media_message(photo=False, video_note=True)))
         self.assertTrue(_is_unsupported_gif_or_video(fake_media_message(photo=False, sticker=True)))
+        self.assertTrue(_is_visual_media_message(fake_media_message(photo=False, animation=True)))
+        self.assertTrue(_is_visual_media_message(fake_media_message(photo=False, video=True)))
+        self.assertTrue(_is_visual_media_message(fake_media_message(photo=False, video_note=True)))
+        self.assertTrue(_is_visual_media_message(fake_media_message(photo=False, sticker=True)))
 
     def test_supported_image_formats_go_to_vision_path(self):
         self.assertTrue(_is_supported_image_message(fake_media_message(photo=True)))
@@ -446,6 +462,12 @@ class MetaSelectionTest(unittest.TestCase):
         self.assertTrue(_is_supported_image_message(fake_media_message(photo=False, document_mime_type="image/webp")))
         self.assertFalse(_is_supported_image_message(fake_media_message(photo=False, document_mime_type="image/gif")))
         self.assertFalse(_is_unsupported_gif_or_video(fake_media_message(photo=False, document_mime_type="image/png")))
+
+    def test_gif_document_file_id_is_available_for_frame_extraction(self):
+        message = fake_media_message(photo=False, document_mime_type="image/gif")
+
+        self.assertTrue(_is_unsupported_gif_or_video(message))
+        self.assertEqual(_media_file_id(message), "document")
 
     def test_codmunity_success_skips_wzstats_fallback(self):
         client = object.__new__(CodmunityClient)
