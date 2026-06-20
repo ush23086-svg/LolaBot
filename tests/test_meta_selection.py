@@ -3,6 +3,7 @@ import time
 import unittest
 from types import SimpleNamespace
 
+from app.handlers import common as common_module
 from app.handlers.common import (
     CHAT_DATA,
     LOLA_WAKEUP_REPLIES,
@@ -59,6 +60,71 @@ def fake_message(chat_id=100, user_id=200, reply_text=None):
 class FakeBot:
     async def me(self):
         return SimpleNamespace(id=999, username="LolaBot")
+
+
+class FakeStatusMessage:
+    def __init__(self):
+        self.edits = []
+
+    async def edit_text(self, text):
+        self.edits.append(text)
+
+
+class FakeHandlerMessage:
+    def __init__(self, *, photo=False, sticker=False, video=False):
+        self.chat = SimpleNamespace(id=123, type="private")
+        self.caption = ""
+        self.text = None
+        self.document = None
+        self.animation = None
+        self.video = SimpleNamespace(file_id="video", mime_type="video/mp4") if video else None
+        self.video_note = None
+        self.sticker = (
+            SimpleNamespace(file_id="sticker", is_animated=False, is_video=False)
+            if sticker
+            else None
+        )
+        self.photo = [SimpleNamespace(file_id="photo")] if photo else []
+        self.sender_chat = None
+        self.forward_from_chat = None
+        self.reply_to_message = None
+        self.from_user = SimpleNamespace(
+            id=111,
+            is_bot=False,
+            first_name="Tester",
+            username="tester",
+            full_name="Tester",
+        )
+        self.replies = []
+        self.status = FakeStatusMessage()
+
+    async def reply(self, text):
+        self.replies.append(text)
+        return self.status
+
+
+class FakeAIProvider:
+    def __init__(self):
+        self.calls = []
+
+    async def analyze_image(self, image_base64, user_name, caption="", reply_context=""):
+        self.calls.append(
+            {
+                "image_base64": image_base64,
+                "user_name": user_name,
+                "caption": caption,
+                "reply_context": reply_context,
+            }
+        )
+        return "ko'rdim"
+
+
+class FakeStatsService:
+    def use_bot_quota(self, chat_id, user_id, chat_type):
+        return True, 1, 10
+
+    def update_memory(self, chat_id, user_id, summary):
+        return None
 
 
 def fake_media_message(
@@ -468,6 +534,105 @@ class MetaSelectionTest(unittest.TestCase):
 
         self.assertTrue(_is_unsupported_gif_or_video(message))
         self.assertEqual(_media_file_id(message), "document")
+
+    def test_photo_handler_uses_image_base64_fast_path(self):
+        calls = {"image": 0, "media": 0}
+
+        async def fake_download_image_base64(message, bot):
+            calls["image"] += 1
+            return "base64-photo"
+
+        async def fake_download_media_data_urls(message, bot):
+            calls["media"] += 1
+            return ["data:image/jpeg;base64,bWVkaWE="]
+
+        original_image = common_module._download_image_base64
+        original_media = common_module._download_media_data_urls
+        common_module._download_image_base64 = fake_download_image_base64
+        common_module._download_media_data_urls = fake_download_media_data_urls
+        try:
+            ai_provider = FakeAIProvider()
+            asyncio.run(
+                common_module.photo_message_handler(
+                    FakeHandlerMessage(photo=True),
+                    FakeBot(),
+                    ai_provider,
+                    FakeStatsService(),
+                    SimpleNamespace(main_group_id=None),
+                )
+            )
+        finally:
+            common_module._download_image_base64 = original_image
+            common_module._download_media_data_urls = original_media
+
+        self.assertEqual(calls, {"image": 1, "media": 0})
+        self.assertEqual(ai_provider.calls[0]["image_base64"], "base64-photo")
+
+    def test_sticker_handler_uses_media_data_url_flow(self):
+        calls = {"image": 0, "media": 0}
+
+        async def fake_download_image_base64(message, bot):
+            calls["image"] += 1
+            return "base64-photo"
+
+        async def fake_download_media_data_urls(message, bot):
+            calls["media"] += 1
+            return ["data:image/webp;base64,c3RpY2tlcg=="]
+
+        original_image = common_module._download_image_base64
+        original_media = common_module._download_media_data_urls
+        common_module._download_image_base64 = fake_download_image_base64
+        common_module._download_media_data_urls = fake_download_media_data_urls
+        try:
+            ai_provider = FakeAIProvider()
+            asyncio.run(
+                common_module.visual_media_message_handler(
+                    FakeHandlerMessage(sticker=True),
+                    FakeBot(),
+                    ai_provider,
+                    FakeStatsService(),
+                    SimpleNamespace(main_group_id=None),
+                )
+            )
+        finally:
+            common_module._download_image_base64 = original_image
+            common_module._download_media_data_urls = original_media
+
+        self.assertEqual(calls, {"image": 0, "media": 1})
+        self.assertEqual(ai_provider.calls[0]["image_base64"], ["data:image/webp;base64,c3RpY2tlcg=="])
+
+    def test_video_handler_uses_media_data_url_flow(self):
+        calls = {"image": 0, "media": 0}
+
+        async def fake_download_image_base64(message, bot):
+            calls["image"] += 1
+            return "base64-photo"
+
+        async def fake_download_media_data_urls(message, bot):
+            calls["media"] += 1
+            return ["data:image/jpeg;base64,ZnJhbWU="]
+
+        original_image = common_module._download_image_base64
+        original_media = common_module._download_media_data_urls
+        common_module._download_image_base64 = fake_download_image_base64
+        common_module._download_media_data_urls = fake_download_media_data_urls
+        try:
+            ai_provider = FakeAIProvider()
+            asyncio.run(
+                common_module.visual_media_message_handler(
+                    FakeHandlerMessage(video=True),
+                    FakeBot(),
+                    ai_provider,
+                    FakeStatsService(),
+                    SimpleNamespace(main_group_id=None),
+                )
+            )
+        finally:
+            common_module._download_image_base64 = original_image
+            common_module._download_media_data_urls = original_media
+
+        self.assertEqual(calls, {"image": 0, "media": 1})
+        self.assertEqual(ai_provider.calls[0]["image_base64"], ["data:image/jpeg;base64,ZnJhbWU="])
 
     def test_codmunity_success_skips_wzstats_fallback(self):
         client = object.__new__(CodmunityClient)
