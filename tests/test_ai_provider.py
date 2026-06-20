@@ -182,6 +182,30 @@ class OpenRouterProviderTest(unittest.IsolatedAsyncioTestCase):
             ["vision-model-1", "vision-model-2"],
         )
 
+    async def test_vision_accepts_multiple_frame_data_urls(self):
+        FakeSession.responses = [
+            FakeResponse(200, {"choices": [{"message": {"content": "frame ok"}}]}),
+        ]
+        provider = OpenRouterProvider(
+            api_keys=[(1, "secret-key-1")],
+            models=["chat-model"],
+            vision_models=["vision-model"],
+            image_models=[],
+            app_name="Lola",
+        )
+
+        answer = await provider.analyze_image(
+            [
+                "data:image/jpeg;base64,Zmlyc3Q=",
+                "data:image/jpeg;base64,c2Vjb25k",
+            ],
+            "Tester",
+        )
+
+        self.assertEqual(answer, "frame ok")
+        content = FakeSession.attempts[0]["content"]
+        self.assertEqual([item["type"] for item in content].count("image_url"), 2)
+
     async def test_keys_status_masks_real_keys(self):
         FakeSession.responses = [
             FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]}),

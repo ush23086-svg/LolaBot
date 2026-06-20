@@ -3,8 +3,12 @@ import base64
 import logging
 import random
 import re
+import shutil
+import subprocess
+import tempfile
 import time
 from datetime import timedelta
+from pathlib import Path
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart
@@ -20,7 +24,7 @@ from aiogram.types import (
 )
 
 from app.config import Settings
-from app.services.ai_provider import AIProvider
+from app.services.ai_provider import AIProvider, IMAGE_ERROR_MESSAGE
 from app.services.meta_engine import (
     CHECKER_FAIL_MESSAGE,
     CodmunityClient,
@@ -48,7 +52,11 @@ META_CONTEXT_TTL_SECONDS = 15 * 60
 VIDEO_FILENAME = "SaveVid_Net_AQNKnUIQh4au0ukBFQeeBEE9GNtzkOFvNFXUDTipfHHr9qwI5m8RUCHhFxyUIY.mp4"
 VIDEO_SONG2_FILENAME = "video_2026-05-31_21-36-53.mp4"
 SUPPORTED_IMAGE_DOCUMENT_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
-UNSUPPORTED_MEDIA_REPLY = "GIF/video ko'rishni hozircha eplay olmayman. Oddiy rasm yoki skrinshot yuboring 😊"
+UNCLEAR_MEDIA_REPLY = "Buni aniq tushunmadim, lekin nimadir hazilga o'xshayapti 😂"
+UNSUPPORTED_MEDIA_REPLY = UNCLEAR_MEDIA_REPLY
+STYLE_FORMALITY_REPLY = "Voy, uzr 😂 Mayli, sizlab gapiraman."
+MEDIA_FRAME_COUNT = 4
+MEDIA_FRAME_MIME_TYPE = "image/jpeg"
 PREMIUM_PLANS = {
     "test": {
         "title": "Lola Premium - 1 kun test",
@@ -162,6 +170,13 @@ def _mentions_lola(text: str) -> bool:
     return "lola" in normalize_text(text)
 
 
+def _forced_style_reply(text: str | None) -> str | None:
+    lowered = (text or "").lower()
+    if "sensirash" in lowered or "senlama" in lowered or "sizlab" in lowered:
+        return STYLE_FORMALITY_REPLY
+    return None
+
+
 async def _is_reply_to_bot(message: Message, bot: Bot) -> bool:
     if not message.reply_to_message or not message.reply_to_message.from_user:
         return False
@@ -271,7 +286,6 @@ async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -
         and message.reply_to_message.from_user.id != me.id
     )
     mentioned_bot = bool(bot_username and f"@{bot_username}" in caption.lower())
-    mentions_lola = "lola" in normalize_text(caption)
     is_main_group = _is_main_group_message(message, settings)
 
     if is_reply_to_bot:
@@ -280,9 +294,6 @@ async def _should_answer_media(message: Message, bot: Bot, settings: Settings) -
     elif mentioned_bot:
         allowed = True
         reason = "allowed_bot_mention"
-    elif mentions_lola:
-        allowed = True
-        reason = "allowed_caption_lola"
     elif is_reply_to_human:
         allowed = False
         reason = "ignored_reply_to_human"
@@ -320,6 +331,8 @@ def _media_content_type(message: Message) -> str:
         return "animation"
     if getattr(message, "video", None):
         return "video"
+    if getattr(message, "video_note", None):
+        return "video_note"
     if getattr(message, "sticker", None):
         return "sticker"
     if getattr(message, "document", None):
@@ -349,6 +362,7 @@ def _is_unsupported_gif_or_video(message: Message) -> bool:
     return (
         _is_animation_message(message)
         or bool(getattr(message, "video", None))
+        or bool(getattr(message, "video_note", None))
         or bool(getattr(message, "sticker", None))
         or mime_type == "image/gif"
         or mime_type.startswith("video/")
@@ -366,6 +380,18 @@ def _is_supported_image_message(message: Message) -> bool:
     return (_media_mime_type(message).lower() in SUPPORTED_IMAGE_DOCUMENT_MIME_TYPES)
 
 
+def _is_visual_media_message(message: Message) -> bool:
+    return bool(
+        getattr(message, "photo", None)
+        or getattr(message, "animation", None)
+        or getattr(message, "video", None)
+        or getattr(message, "video_note", None)
+        or getattr(message, "sticker", None)
+        or _is_supported_image_message(message)
+        or _is_unsupported_gif_or_video(message)
+    )
+
+
 async def _should_answer_unsupported_media(message: Message, bot: Bot) -> bool:
     if message.chat.type == "private":
         return True
@@ -379,8 +405,7 @@ async def _should_answer_unsupported_media(message: Message, bot: Bot) -> bool:
         and message.reply_to_message.from_user.id == me.id
     )
     mentioned_bot = bool(bot_username and f"@{bot_username}" in caption.lower())
-    mentions_lola = "lola" in normalize_text(caption)
-    return is_reply_to_bot or mentioned_bot or mentions_lola
+    return is_reply_to_bot or mentioned_bot
 
 
 def _log_unsupported_media_decision(message: Message, *, allowed: bool) -> None:
@@ -560,16 +585,29 @@ def _selection_is_out_of_range(text: str, weapons: list[dict]) -> bool:
 
 
 def _reply_context(message: Message) -> str:
+    lines = [
+        f"Chat turi: {message.chat.type}",
+        f"Userning yangi xabari: {(message.text or message.caption or '').strip()}",
+    ]
     reply = message.reply_to_message
     if not reply:
-        return ""
+        return "\n".join(lines)
 
     text = reply.text or reply.caption or ""
     if not text.strip():
-        return ""
+        return "\n".join(lines)
 
-    sender = reply.from_user.full_name if reply.from_user else "oldingi xabar"
-    return f"Reply qilingan xabar ({sender}): {text.strip()}"
+    sender = "oldingi xabar"
+    if reply.from_user:
+        sender = (
+            getattr(reply.from_user, "full_name", None)
+            or getattr(reply.from_user, "username", None)
+            or sender
+        )
+    lines.append(f"Reply qilingan xabar ({sender}): {text.strip()}")
+    if reply.from_user and getattr(reply.from_user, "is_bot", False):
+        lines.append(f"Oldingi Lola javobi: {text.strip()}")
+    return "\n".join(lines)
 
 
 def _wants_joke_video(text: str) -> bool:
@@ -628,6 +666,157 @@ def _image_file_id(message: Message) -> str | None:
         return document.file_id
 
     return None
+
+
+def _media_file_id(message: Message) -> str | None:
+    image_file_id = _image_file_id(message)
+    if image_file_id:
+        return image_file_id
+
+    for attr in ("sticker", "animation", "video", "video_note"):
+        media = getattr(message, attr, None)
+        file_id = getattr(media, "file_id", None)
+        if file_id:
+            return file_id
+    return None
+
+
+def _media_download_suffix(message: Message, file_path: str | None = None) -> str:
+    suffix = Path(file_path or "").suffix
+    if suffix:
+        return suffix
+
+    mime_type = _media_mime_type(message).lower()
+    if mime_type == "image/gif":
+        return ".gif"
+    if mime_type == "image/png":
+        return ".png"
+    if mime_type == "image/webp":
+        return ".webp"
+    if mime_type.startswith("video/"):
+        return ".mp4"
+    if getattr(message, "video_note", None):
+        return ".mp4"
+
+    sticker = getattr(message, "sticker", None)
+    if sticker:
+        if getattr(sticker, "is_video", False):
+            return ".webm"
+        if getattr(sticker, "is_animated", False):
+            return ".tgs"
+        return ".webp"
+
+    return ".jpg"
+
+
+def _media_image_mime_type(message: Message) -> str:
+    mime_type = _media_mime_type(message).lower()
+    if mime_type in SUPPORTED_IMAGE_DOCUMENT_MIME_TYPES:
+        return mime_type
+    if getattr(message, "sticker", None):
+        return "image/webp"
+    if getattr(message, "photo", None):
+        return "image/jpeg"
+    return "image/jpeg"
+
+
+def _data_url(data: bytes, mime_type: str) -> str:
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _ffmpeg_executable() -> str:
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return shutil.which("ffmpeg") or "ffmpeg"
+
+
+def _extract_frame_data_urls(video_path: Path, frame_count: int = MEDIA_FRAME_COUNT) -> list[str]:
+    output_dir = Path(tempfile.mkdtemp(prefix="lola_frames_"))
+    pattern = output_dir / "frame_%02d.jpg"
+    command = [
+        _ffmpeg_executable(),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(video_path),
+        "-vf",
+        "fps=2,scale=720:-2:force_original_aspect_ratio=decrease",
+        "-frames:v",
+        str(frame_count),
+        str(pattern),
+    ]
+
+    try:
+        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        frames = sorted(output_dir.glob("frame_*.jpg"))[:frame_count]
+        return [_data_url(frame.read_bytes(), MEDIA_FRAME_MIME_TYPE) for frame in frames]
+    finally:
+        for frame in output_dir.glob("frame_*.jpg"):
+            try:
+                frame.unlink()
+            except OSError:
+                logger.debug("Failed to delete temp frame %s", frame)
+        try:
+            output_dir.rmdir()
+        except OSError:
+            logger.debug("Failed to delete temp frame dir %s", output_dir)
+
+
+async def _download_media_bytes(message: Message, bot: Bot) -> tuple[bytes, str] | None:
+    file_id = _media_file_id(message)
+    if not file_id:
+        return None
+
+    file = await bot.get_file(file_id)
+    if not file.file_path:
+        return None
+
+    buffer = await bot.download_file(file.file_path)
+    if buffer is None:
+        return None
+
+    data = buffer.read()
+    if not data:
+        return None
+
+    return data, _media_download_suffix(message, file.file_path)
+
+
+async def _download_media_data_urls(message: Message, bot: Bot) -> list[str]:
+    downloaded = await _download_media_bytes(message, bot)
+    if not downloaded:
+        return []
+
+    data, suffix = downloaded
+    if _is_supported_image_message(message) or (
+        getattr(message, "sticker", None)
+        and not getattr(message.sticker, "is_animated", False)
+        and not getattr(message.sticker, "is_video", False)
+    ):
+        return [_data_url(data, _media_image_mime_type(message))]
+
+    temp_path: Path | None = None
+    try:
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        temp_path = Path(temp_file.name)
+        with temp_file:
+            temp_file.write(data)
+        return await asyncio.to_thread(_extract_frame_data_urls, temp_path, MEDIA_FRAME_COUNT)
+    except Exception:
+        logger.exception("Failed to extract frames from media content_type=%s", _media_content_type(message))
+        return []
+    finally:
+        if temp_path:
+            try:
+                temp_path.unlink()
+            except OSError:
+                logger.debug("Failed to delete temp media %s", temp_path)
 
 
 async def _download_image_base64(message: Message, bot: Bot) -> str | None:
@@ -1230,12 +1419,15 @@ async def photo_message_handler(
     await _handle_image_message(message, bot, ai_provider, stats_service, settings)
 
 
-@router.message(F.animation | F.video | F.sticker)
-async def unsupported_visual_media_handler(
+@router.message(F.animation | F.video | F.video_note | F.sticker)
+async def visual_media_message_handler(
     message: Message,
     bot: Bot,
+    ai_provider: AIProvider,
+    stats_service: StatsService,
+    settings: Settings,
 ) -> None:
-    await _handle_unsupported_media(message, bot)
+    await _handle_image_message(message, bot, ai_provider, stats_service, settings)
 
 
 @router.message(F.document)
@@ -1247,7 +1439,7 @@ async def document_image_message_handler(
     settings: Settings,
 ) -> None:
     if _is_unsupported_gif_or_video(message):
-        await _handle_unsupported_media(message, bot)
+        await _handle_image_message(message, bot, ai_provider, stats_service, settings)
         return
 
     if not _is_supported_image_message(message):
@@ -1294,28 +1486,34 @@ async def _handle_image_message(
     )
     if not await _should_answer_media(message, bot, settings):
         return
+    forced = _forced_style_reply(message.caption)
+    if forced:
+        await message.reply(forced)
+        return
     if not await _check_usage_limit(message, stats_service):
         return
 
-    status = await message.reply("Rasmni ko'rib chiqyapman...")
+    status = await message.reply("Mediani ko'rib chiqyapman...")
 
     try:
-        image_base64 = await _download_image_base64(message, bot)
-        if not image_base64:
-            await status.edit_text("Rasmni yuklab olishda muammo bo'ldi. Rasm yoki skrinshotni qayta yuboring.")
+        image_urls = await _download_media_data_urls(message, bot)
+        if not image_urls:
+            await status.edit_text(UNCLEAR_MEDIA_REPLY)
             return
 
         answer = await ai_provider.analyze_image(
-            image_base64=image_base64,
+            image_base64=image_urls,
             user_name=_user_label(message),
             caption=message.caption or "",
             reply_context=_reply_context(message),
         )
+        if not answer or answer == IMAGE_ERROR_MESSAGE:
+            answer = UNCLEAR_MEDIA_REPLY
         await _send_answer(message, answer, status=status)
-        await _save_memory(message, stats_service, message.caption or "[rasm]", answer)
+        await _save_memory(message, stats_service, message.caption or f"[{_media_content_type(message)}]", answer)
     except Exception:
         logger.exception("Image media handling failed")
-        await status.edit_text("Rasmni tahlil qilishda xatolik bo'ldi. Keyinroq qayta urinib ko'ring.")
+        await status.edit_text(UNCLEAR_MEDIA_REPLY)
 
 
 @router.message(F.text)
@@ -1329,6 +1527,11 @@ async def text_handler(
     text = message.text or ""
     if not text.strip():
         await message.reply("Aniqroq yozing.")
+        return
+
+    forced = _forced_style_reply(text)
+    if forced:
+        await message.reply(forced)
         return
 
     if _wants_joke_video(text):
