@@ -673,7 +673,7 @@ def _media_file_id(message: Message) -> str | None:
     if image_file_id:
         return image_file_id
 
-    for attr in ("sticker", "animation", "video", "video_note"):
+    for attr in ("document", "sticker", "animation", "video", "video_note"):
         media = getattr(message, attr, None)
         file_id = getattr(media, "file_id", None)
         if file_id:

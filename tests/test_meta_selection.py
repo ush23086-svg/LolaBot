@@ -12,6 +12,7 @@ from app.handlers.common import (
     _is_supported_image_message,
     _is_exact_lola_wakeup,
     _forced_style_reply,
+    _media_file_id,
     _lola_wakeup_reply,
     _safe_loadout_error,
     _should_handle_meta_list,
@@ -461,6 +462,12 @@ class MetaSelectionTest(unittest.TestCase):
         self.assertTrue(_is_supported_image_message(fake_media_message(photo=False, document_mime_type="image/webp")))
         self.assertFalse(_is_supported_image_message(fake_media_message(photo=False, document_mime_type="image/gif")))
         self.assertFalse(_is_unsupported_gif_or_video(fake_media_message(photo=False, document_mime_type="image/png")))
+
+    def test_gif_document_file_id_is_available_for_frame_extraction(self):
+        message = fake_media_message(photo=False, document_mime_type="image/gif")
+
+        self.assertTrue(_is_unsupported_gif_or_video(message))
+        self.assertEqual(_media_file_id(message), "document")
 
     def test_codmunity_success_skips_wzstats_fallback(self):
         client = object.__new__(CodmunityClient)
