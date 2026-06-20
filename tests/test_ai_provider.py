@@ -7,6 +7,8 @@ from app.config import (
     _clean_models,
 )
 from app.services.ai_provider import OpenRouterProvider
+from app.services.ai_provider import MEDIA_ANALYSIS_PHRASES
+from app.services.ai_provider import MEDIA_REACTION_MAX_CHARS
 from app.services.ai_provider import _sanitize_user_name_leak
 from app.services.ai_provider import _strip_markdown_emphasis
 
@@ -206,6 +208,46 @@ class OpenRouterProviderTest(unittest.IsolatedAsyncioTestCase):
         content = FakeSession.attempts[0]["content"]
         self.assertEqual([item["type"] for item in content].count("image_url"), 2)
         self.assertIn("framelarini", content[0]["text"])
+
+    async def test_media_reaction_removes_analysis_style_and_stays_short(self):
+        long_tail = " ".join(["yana"] * 80)
+        FakeSession.responses = [
+            FakeResponse(
+                200,
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    "Stickerda bu yerda rasmda captiondagi hazil "
+                                    "deyotgandek ko'rinmoqda, rosa troll vibe 😂. "
+                                    f"{long_tail}"
+                                )
+                            }
+                        }
+                    ]
+                },
+            ),
+        ]
+        provider = OpenRouterProvider(
+            api_keys=[(1, "secret-key-1")],
+            models=["chat-model"],
+            vision_models=["vision-model"],
+            image_models=[],
+            app_name="Lola",
+        )
+
+        answer = await provider.analyze_image(
+            ["data:image/webp;base64,c3RpY2tlcg=="],
+            "Tester",
+        )
+
+        lowered = answer.lower()
+        for phrase in MEDIA_ANALYSIS_PHRASES:
+            self.assertNotIn(phrase, lowered)
+        for phrase in ("bu yerda", "captionda"):
+            self.assertNotIn(phrase, lowered)
+        self.assertLessEqual(len(answer), MEDIA_REACTION_MAX_CHARS)
 
     async def test_vision_string_uses_static_image_prompt(self):
         FakeSession.responses = [

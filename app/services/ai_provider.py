@@ -27,6 +27,15 @@ VISION_KEY_PRIORITY = (1, 3, 2, 4, 5)
 VISION_STATUS_IMAGE_BASE64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
 )
+MEDIA_ANALYSIS_PHRASES = (
+    "stickerda",
+    "rasmda",
+    "captiondagi",
+    "deyotgandek",
+    "ko'rinmoqda",
+    "ko‘rinmoqda",
+)
+MEDIA_REACTION_MAX_CHARS = 220
 
 SYSTEM_PROMPT = """
 Sen Lola ismli Telegram botisan.
@@ -229,16 +238,16 @@ class OpenRouterProvider(AIProvider):
                 f"Foydalanuvchi: {user_name}\n"
                 f"{context_text}"
                 f"Caption: {caption or 'yoq'}\n\n"
-                "Rasm, sticker, GIF yoki video framelarini caption va reply konteksti bilan tushun.\n"
-                "Vazifalar:\n"
-                "1. Rasm/media ichida nima borligini qisqa tushuntir.\n"
-                "2. Bu hazil, mem yoki trollmi aniqlagin.\n"
-                "3. Kayfiyatini aniqlagin.\n"
-                "4. Lola nomidan o'zbekcha qisqa javob taklif qil.\n\n"
-                "Javob qoidalari:\n"
-                "- Guruh uchun tabiiy, 1-2 gapdan oshmasin.\n"
-                "- Hazilga mos bo'lsin, lekin shaxsni kamsitmasin.\n"
-                "- Bola, millat, din yoki kasallik ustidan hazil qilma.\n"
+                "Sticker, GIF, video sticker yoki video framelarining ma'nosi, kayfiyati, "
+                "hazil/mem/troll ohangi va reply kontekstini ichingda tushun.\n"
+                "Javobda media tahlili yoki tasvirlab berish yozma; faqat normal Telegram chat reaction yoz.\n"
+                "\"Bu yerda\", \"stickerda\", \"rasmda\", \"captionda\", \"captiondagi\", "
+                "\"deyotgandek\", \"ko'rinmoqda\" kabi analiz uslubidagi iboralarni ishlatma.\n"
+                "Tayyor FAQ/template javob yoki yodlangan misol ishlatma; caption, reply context, "
+                "user ohangi va media kayfiyatiga qarab har safar tabiiy javob tuz.\n"
+                "Javob qisqa bo'lsin, lekin bir xil gaplarni qayta-qayta ishlatma.\n"
+                "Lola shaxsiyati saqlansin: hazilkash, o'zbekcha/ruscha aralash, odamdek.\n"
+                "Odamni kamsitma; bola, millat, din yoki kasallik ustidan hazil qilma.\n"
                 "- Juda qo'pol kontent bo'lsa neytral javob ber.\n"
                 f"- Media tushunarsiz bo'lsa aynan shuni yoz: {UNCLEAR_MEDIA_REPLY}\n"
                 "- Markdown ishlatma: **bold**, *** yoki sarlavha markerlarini yozma.\n"
@@ -261,12 +270,15 @@ class OpenRouterProvider(AIProvider):
             "temperature": 0.4,
             "max_tokens": 900 if is_static_image else 220,
         }
-        return await self._chat_completion(
+        answer = await self._chat_completion(
             payload,
             self._image_models(),
             operation="vision",
             user_name=user_name,
         )
+        if not is_static_image and answer != AI_ERROR_MESSAGE:
+            return _sanitize_media_reaction_answer(answer)
+        return answer
 
     def _image_models(self) -> list[str]:
         return self.vision_models
@@ -952,6 +964,20 @@ def _sanitize_user_name_leak(content: str, user_name: str) -> str:
 
 def _strip_markdown_emphasis(content: str) -> str:
     return content.replace("***", "").replace("**", "")
+
+
+def _sanitize_media_reaction_answer(content: str) -> str:
+    answer = _strip_markdown_emphasis(content).strip()
+    for phrase in MEDIA_ANALYSIS_PHRASES:
+        answer = re.sub(re.escape(phrase), "", answer, flags=re.IGNORECASE)
+    answer = re.sub(r"\b(bu yerda|captionda)\b", "", answer, flags=re.IGNORECASE)
+    answer = re.sub(r"\s+", " ", answer).strip(" ,.-:;")
+
+    sentences = re.split(r"(?<=[.!?])\s+", answer)
+    answer = " ".join(part for part in sentences[:2] if part).strip()
+    if len(answer) > MEDIA_REACTION_MAX_CHARS:
+        answer = answer[:MEDIA_REACTION_MAX_CHARS].rsplit(" ", 1)[0].strip(" ,.-:;")
+    return answer or UNCLEAR_MEDIA_REPLY
 
 
 def _vision_image_urls(image_base64: str | list[str]) -> list[str]:
