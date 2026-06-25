@@ -9,7 +9,7 @@ LolaBot - Telegram uchun o'zbekcha yordamchi bot. Bot `aiogram` bilan ishlaydi, 
 - `OPENROUTER_API_KEY_1/2/3/4/5` bo'yicha key rotation ishlaydi.
 - Oddiy chat `CHAT_MODEL` orqali ishlaydi.
 - `CHAT_MODEL` limit yoki provider xatosiga tushsa `FALLBACK_MODEL` ishlaydi.
-- Rasmda faqat `VISION_MODEL` ishlaydi.
+- Rasmda `VISION_MODEL` va `OPENROUTER_VISION_MODELS` fallback ro'yxati ishlaydi.
 - Matematika va murakkab reasoning savollar `REASONING_MODEL` orqali ishlaydi.
 - `/image <prompt>` orqali OpenRouter image model bilan rasm yaratadi.
 - `IMAGE_MODEL_1/2` bo'yicha image model fallback ishlaydi.
@@ -94,6 +94,7 @@ Admin komandalar faqat `OWNER_ID` uchun private chatda ishlaydi:
 /check <user_id>
 /grant <user_id> [days]
 /revoke <user_id>
+/keys
 /keys_status
 /vision_status
 /chat_id
@@ -131,7 +132,8 @@ OPENROUTER_API_KEY_4=
 OPENROUTER_API_KEY_5=
 CHAT_MODEL=meta-llama/llama-3.3-70b-instruct:free
 FALLBACK_MODEL=google/gemma-3-27b-it
-VISION_MODEL=nex-agi/nex-n2-pro:free
+VISION_MODEL=nex-agi/nex-n2-pro
+OPENROUTER_VISION_MODELS=google/gemini-2.5-flash,qwen/qwen2.5-vl-72b-instruct
 REASONING_MODEL=google/gemini-3.5-flash
 IMAGE_MODEL_1=sourceful/riverflow-v2.5-pro:free
 IMAGE_MODEL_2=sourceful/riverflow-v2.5-fast:free
@@ -159,7 +161,8 @@ OPENROUTER_API_KEY_4=
 OPENROUTER_API_KEY_5=
 CHAT_MODEL=meta-llama/llama-3.3-70b-instruct:free
 FALLBACK_MODEL=google/gemma-3-27b-it
-VISION_MODEL=nex-agi/nex-n2-pro:free
+VISION_MODEL=nex-agi/nex-n2-pro
+OPENROUTER_VISION_MODELS=google/gemini-2.5-flash,qwen/qwen2.5-vl-72b-instruct
 REASONING_MODEL=google/gemini-3.5-flash
 IMAGE_MODEL_1=sourceful/riverflow-v2.5-pro:free
 IMAGE_MODEL_2=sourceful/riverflow-v2.5-fast:free
