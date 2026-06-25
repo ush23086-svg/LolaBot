@@ -794,7 +794,7 @@ async def _download_media_data_urls(message: Message, bot: Bot) -> list[str]:
         return []
 
     data, suffix = downloaded
-    if _is_supported_image_message(message) or (
+    if (
         getattr(message, "sticker", None)
         and not getattr(message.sticker, "is_animated", False)
         and not getattr(message.sticker, "is_video", False)
@@ -1416,7 +1416,7 @@ async def photo_message_handler(
     stats_service: StatsService,
     settings: Settings,
 ) -> None:
-    await _handle_image_message(message, bot, ai_provider, stats_service, settings)
+    await _handle_static_image_message(message, bot, ai_provider, stats_service, settings)
 
 
 @router.message(F.animation | F.video | F.video_note | F.sticker)
@@ -1452,7 +1452,7 @@ async def document_image_message_handler(
         )
         return
 
-    await _handle_image_message(message, bot, ai_provider, stats_service, settings)
+    await _handle_static_image_message(message, bot, ai_provider, stats_service, settings)
 
 
 async def _handle_unsupported_media(message: Message, bot: Bot) -> None:
@@ -1514,6 +1514,54 @@ async def _handle_image_message(
     except Exception:
         logger.exception("Image media handling failed")
         await status.edit_text(UNCLEAR_MEDIA_REPLY)
+
+
+async def _handle_static_image_message(
+    message: Message,
+    bot: Bot,
+    ai_provider: AIProvider,
+    stats_service: StatsService,
+    settings: Settings,
+) -> None:
+    logger.info(
+        "static_image_handler_received chat_type=%s chat_id=%s has_photo=%s has_document=%s caption=%r "
+        "content_type=%s mime_type=%s",
+        message.chat.type,
+        message.chat.id,
+        bool(message.photo),
+        bool(message.document),
+        (message.caption or "")[:300],
+        _media_content_type(message),
+        _media_mime_type(message),
+    )
+    if not await _should_answer_media(message, bot, settings):
+        return
+    forced = _forced_style_reply(message.caption)
+    if forced:
+        await message.reply(forced)
+        return
+    if not await _check_usage_limit(message, stats_service):
+        return
+
+    status = await message.reply("Rasmni ko'rib chiqyapman...")
+
+    try:
+        image_base64 = await _download_image_base64(message, bot)
+        if not image_base64:
+            await status.edit_text("Rasmni yuklab olishda muammo bo'ldi. Rasm yoki skrinshotni qayta yuboring.")
+            return
+
+        answer = await ai_provider.analyze_image(
+            image_base64=image_base64,
+            user_name=_user_label(message),
+            caption=message.caption or "",
+            reply_context=_reply_context(message),
+        )
+        await _send_answer(message, answer, status=status)
+        await _save_memory(message, stats_service, message.caption or "[rasm]", answer)
+    except Exception:
+        logger.exception("Static image media handling failed")
+        await status.edit_text("Rasmni tahlil qilishda xatolik bo'ldi. Keyinroq qayta urinib ko'ring.")
 
 
 @router.message(F.text)
