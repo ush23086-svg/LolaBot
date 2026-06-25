@@ -18,6 +18,7 @@ ADMIN_COMMANDS = {
     "/users",
     "/paid",
     "/income",
+    "/keys",
     "/keys_status",
     "/vision_status",
     "/chat_id",
