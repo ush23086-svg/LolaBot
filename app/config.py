@@ -5,7 +5,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 OPENROUTER_DEFAULT_CHAT_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
 OPENROUTER_DEFAULT_FALLBACK_MODEL = "google/gemma-3-27b-it"
-OPENROUTER_DEFAULT_VISION_MODEL = "nex-agi/nex-n2-pro:free"
+OPENROUTER_DEFAULT_VISION_MODELS = [
+    "nex-agi/nex-n2-pro",
+    "google/gemini-2.5-flash",
+    "qwen/qwen2.5-vl-72b-instruct",
+]
+OPENROUTER_DEFAULT_VISION_MODEL = OPENROUTER_DEFAULT_VISION_MODELS[0]
 OPENROUTER_DEFAULT_REASONING_MODEL = "google/gemini-3.5-flash"
 OPENROUTER_DEFAULT_MODEL = OPENROUTER_DEFAULT_CHAT_MODEL
 OPENROUTER_DEFAULT_IMAGE_MODELS = [
@@ -19,6 +24,7 @@ OPENROUTER_LEGACY_MODEL_ALIASES = {
     "google/gemini-1.5-flash": OPENROUTER_DEFAULT_REASONING_MODEL,
     "google/gemini-flash-1.5": OPENROUTER_DEFAULT_REASONING_MODEL,
     "meta-llama/llama-3.2-3b-instruct:free": OPENROUTER_DEFAULT_CHAT_MODEL,
+    "nex-agi/nex-n2-pro:free": OPENROUTER_DEFAULT_VISION_MODEL,
 }
 
 
@@ -54,6 +60,14 @@ class Settings(BaseSettings):
     openrouter_vision_model_3: str | None = Field(
         default=None,
         alias="OPENROUTER_VISION_MODEL_3",
+    )
+    openrouter_vision_models_raw: str | None = Field(
+        default=None,
+        alias="OPENROUTER_VISION_MODELS",
+    )
+    vision_models_raw: str | None = Field(
+        default=None,
+        alias="VISION_MODELS",
     )
     image_model_1: str | None = Field(
         default=OPENROUTER_DEFAULT_IMAGE_MODELS[0],
@@ -118,14 +132,15 @@ class Settings(BaseSettings):
 
     @property
     def openrouter_vision_models(self) -> list[str]:
-        if self.vision_model:
-            return _clean_models([self.vision_model])
         models = [
+            self.vision_model,
+            *_split_models(self.openrouter_vision_models_raw),
+            *_split_models(self.vision_models_raw),
             self.openrouter_vision_model_1,
             self.openrouter_vision_model_2,
             self.openrouter_vision_model_3,
         ]
-        return _clean_models(models)
+        return _clean_models(models) or OPENROUTER_DEFAULT_VISION_MODELS
 
     @property
     def openrouter_reasoning_models(self) -> list[str]:
@@ -148,6 +163,12 @@ def _clean_models(models: list[str | None]) -> list[str]:
         seen.add(model)
         clean_models.append(model)
     return clean_models
+
+
+def _split_models(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [part.strip() for part in value.replace("\n", ",").split(",") if part.strip()]
 
 
 @lru_cache
