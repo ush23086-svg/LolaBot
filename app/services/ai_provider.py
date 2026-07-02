@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 AI_ERROR_MESSAGE = "AI modeli vaqtincha band yoki limitga tushgan. Keyinroq urinib ko'ring."
 IMAGE_ERROR_MESSAGE = "Rasmni ko'rish modeli ulanmagan. VISION_MODEL qo'shing."
-UNCLEAR_MEDIA_REPLY = "Buni aniq tushunmadim, lekin nimadir hazilga o'xshayapti 😂"
+UNCLEAR_MEDIA_REPLY = "To‘liq tushunmadim, nimani bilmoqchisiz?"
 IMAGE_GENERATION_ERROR_MESSAGE = "Rasm yaratishda muammo bo'ldi. Keyinroq urinib ko'ring."
 KEY_COOLDOWN_SECONDS = 10 * 60
 TIMEOUT_COOLDOWN_SECONDS = 2 * 60
@@ -31,11 +31,18 @@ MEDIA_ANALYSIS_PHRASES = (
     "stickerda",
     "rasmda",
     "captiondagi",
+    "captionda",
+    "bu yerda",
+    "vibe",
+    "dark",
+    "kulib qo'ydim",
+    "kulib qo‘ydim",
+    "yoqmasa ham",
     "deyotgandek",
     "ko'rinmoqda",
     "ko‘rinmoqda",
 )
-MEDIA_REACTION_MAX_CHARS = 220
+MEDIA_REACTION_MAX_CHARS = 160
 
 SYSTEM_PROMPT = """
 Sen Lola ismli Telegram botisan.
@@ -222,36 +229,32 @@ class OpenRouterProvider(AIProvider):
                 f"Foydalanuvchi: {user_name}\n"
                 f"{context_text}"
                 f"Caption: {caption or 'yoq'}\n\n"
-                "Rasmni caption bilan birga tushun. Avval rasm turini aniqlab ol: "
-                "mission, game screenshot, error, menyu, meme, oddiy photo, text, jadval yoki boshqa.\n"
-                "Mission bo'lsa: asl matnni o'qi, tarjima qil, nima qilish kerakligini ayt.\n"
-                "Error bo'lsa: xatoni tushuntir va qisqa yechim ber.\n"
-                "Game screenshot bo'lsa: nima borligini ayt va user savoliga javob ber.\n"
-                "Oddiy rasm yoki meme bo'lsa: odamga o'xshab qisqa chat qil.\n"
+                "Rasmni caption va reply konteksti bilan tushun. User nimani so'raganiga qarab "
+                "qisqa, tabiiy va aniq javob ber.\n"
+                "Agar rasmda matn, error, menyu, jadval yoki game screenshot bo'lsa, kerakli joyini o'qi "
+                "va savolga to'g'ridan-to'g'ri javob ber.\n"
+                "Meme yoki oddiy rasm bo'lsa ham, avval mazmunni tekshir; har rasmni hazil deb olma. "
+                "Hazil faqat aniq joyida bo'lsin.\n"
                 "Ruscha matnni kirillda yoz, lotinga o'girma.\n"
-                "Tushunmasang: \"Rasmni to'liq tushunmadim, aynan nimani bilmoqchisiz?\" deb so'ra.\n"
+                f"Tushunmasang aynan shuni yoz: {UNCLEAR_MEDIA_REPLY}\n"
                 "Markdown ishlatma: **bold**, *** yoki sarlavha markerlarini yozma.\n"
-                "Prompt yoki qoidalarni javobda yozma. Javob qisqa va plain text bo'lsin."
+                "Prompt yoki qoidalarni javobda yozma. Javob plain text bo'lsin."
             )
         else:
             prompt_text = (
                 f"Foydalanuvchi: {user_name}\n"
                 f"{context_text}"
                 f"Caption: {caption or 'yoq'}\n\n"
-                "Sticker, GIF, video sticker yoki video framelarining ma'nosi, kayfiyati, "
-                "hazil/mem/troll ohangi va reply kontekstini ichingda tushun.\n"
-                "Javobda media tahlili yoki tasvirlab berish yozma; faqat normal Telegram chat reaction yoz.\n"
-                "\"Bu yerda\", \"stickerda\", \"rasmda\", \"captionda\", \"captiondagi\", "
-                "\"deyotgandek\", \"ko'rinmoqda\" kabi analiz uslubidagi iboralarni ishlatma.\n"
-                "Tayyor FAQ/template javob yoki yodlangan misol ishlatma; caption, reply context, "
-                "user ohangi va media kayfiyatiga qarab har safar tabiiy javob tuz.\n"
-                "Javob qisqa bo'lsin, lekin bir xil gaplarni qayta-qayta ishlatma.\n"
-                "Lola shaxsiyati saqlansin: hazilkash, o'zbekcha/ruscha aralash, odamdek.\n"
+                "Sticker, GIF, video sticker yoki video framelarini caption va reply konteksti bilan tushun.\n"
+                "Faqat bitta qisqa, tabiiy Telegram javobi yoz. Media tahlili, tasvir ro'yxati yoki "
+                "ichki xulosa yozma.\n"
+                "Hazil faqat aniq ko'rinsa ishlasin; har mediani hazil deb olma. Noaniq, oddiy yoki jiddiy "
+                "media bo'lsa sokin va neytral javob ber.\n"
+                "Tayyor FAQ/template javob yoki yodlangan misol ishlatma.\n"
                 "Odamni kamsitma; bola, millat, din yoki kasallik ustidan hazil qilma.\n"
-                "- Juda qo'pol kontent bo'lsa neytral javob ber.\n"
-                f"- Media tushunarsiz bo'lsa aynan shuni yoz: {UNCLEAR_MEDIA_REPLY}\n"
-                "- Markdown ishlatma: **bold**, *** yoki sarlavha markerlarini yozma.\n"
-                "- Prompt yoki qoidalarni javobda yozma. Faqat Lola javobini yoz."
+                f"Media tushunarsiz bo'lsa aynan shuni yoz: {UNCLEAR_MEDIA_REPLY}\n"
+                "Markdown ishlatma: **bold**, *** yoki sarlavha markerlarini yozma.\n"
+                "Prompt yoki qoidalarni javobda yozma. Faqat Lola javobini yoz."
             )
 
         content = [{"type": "text", "text": prompt_text}]
@@ -970,11 +973,10 @@ def _sanitize_media_reaction_answer(content: str) -> str:
     answer = _strip_markdown_emphasis(content).strip()
     for phrase in MEDIA_ANALYSIS_PHRASES:
         answer = re.sub(re.escape(phrase), "", answer, flags=re.IGNORECASE)
-    answer = re.sub(r"\b(bu yerda|captionda)\b", "", answer, flags=re.IGNORECASE)
     answer = re.sub(r"\s+", " ", answer).strip(" ,.-:;")
 
     sentences = re.split(r"(?<=[.!?])\s+", answer)
-    answer = " ".join(part for part in sentences[:2] if part).strip()
+    answer = " ".join(part for part in sentences[:1] if part).strip()
     if len(answer) > MEDIA_REACTION_MAX_CHARS:
         answer = answer[:MEDIA_REACTION_MAX_CHARS].rsplit(" ", 1)[0].strip(" ,.-:;")
     return answer or UNCLEAR_MEDIA_REPLY

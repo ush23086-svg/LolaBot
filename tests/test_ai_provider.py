@@ -9,6 +9,7 @@ from app.config import (
 from app.services.ai_provider import OpenRouterProvider
 from app.services.ai_provider import MEDIA_ANALYSIS_PHRASES
 from app.services.ai_provider import MEDIA_REACTION_MAX_CHARS
+from app.services.ai_provider import UNCLEAR_MEDIA_REPLY
 from app.services.ai_provider import _sanitize_user_name_leak
 from app.services.ai_provider import _strip_markdown_emphasis
 
@@ -249,6 +250,29 @@ class OpenRouterProviderTest(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(phrase, lowered)
         self.assertLessEqual(len(answer), MEDIA_REACTION_MAX_CHARS)
 
+    async def test_media_prompt_avoids_cringe_reaction_words(self):
+        FakeSession.responses = [
+            FakeResponse(200, {"choices": [{"message": {"content": "tushunarli"}}]}),
+        ]
+        provider = OpenRouterProvider(
+            api_keys=[(1, "secret-key-1")],
+            models=["chat-model"],
+            vision_models=["vision-model"],
+            image_models=[],
+            app_name="Lola",
+        )
+
+        await provider.analyze_image(
+            ["data:image/webp;base64,c3RpY2tlcg=="],
+            "Tester",
+        )
+
+        prompt = FakeSession.attempts[0]["content"][0]["text"].lower()
+        for phrase in ("vibe", "dark", "kulib qo'ydim", "kulib qo‘ydim", "yoqmasa ham", "deyotgandek"):
+            self.assertNotIn(phrase, prompt)
+        self.assertIn("faqat bitta qisqa, tabiiy", prompt)
+        self.assertIn("har mediani hazil deb olma", prompt)
+
     async def test_vision_string_uses_static_image_prompt(self):
         FakeSession.responses = [
             FakeResponse(200, {"choices": [{"message": {"content": "static ok"}}]}),
@@ -265,8 +289,15 @@ class OpenRouterProviderTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(answer, "static ok")
         content = FakeSession.attempts[0]["content"]
-        self.assertIn("Rasmni caption bilan birga tushun", content[0]["text"])
+        self.assertIn("qisqa, tabiiy va aniq javob ber", content[0]["text"])
+        self.assertIn(UNCLEAR_MEDIA_REPLY, content[0]["text"])
         self.assertNotIn("framelarini", content[0]["text"])
+
+    def test_unclear_media_reply_is_plain(self):
+        self.assertEqual(UNCLEAR_MEDIA_REPLY, "To‘liq tushunmadim, nimani bilmoqchisiz?")
+        lowered = UNCLEAR_MEDIA_REPLY.lower()
+        self.assertNotIn("hazilga", lowered)
+        self.assertNotIn("😂", UNCLEAR_MEDIA_REPLY)
 
     async def test_keys_status_masks_real_keys(self):
         FakeSession.responses = [

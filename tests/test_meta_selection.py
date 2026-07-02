@@ -509,7 +509,8 @@ class MetaSelectionTest(unittest.TestCase):
         self.assertTrue(_is_unsupported_gif_or_video(caption_message))
         self.assertTrue(asyncio.run(_should_answer_unsupported_media(caption_message, FakeBot())))
         self.assertTrue(asyncio.run(_should_answer_unsupported_media(reply_message, FakeBot())))
-        self.assertIn("Buni aniq tushunmadim", UNSUPPORTED_MEDIA_REPLY)
+        self.assertEqual(UNSUPPORTED_MEDIA_REPLY, "To‘liq tushunmadim, nimani bilmoqchisiz?")
+        self.assertNotIn("hazilga", UNSUPPORTED_MEDIA_REPLY.lower())
 
     def test_animation_video_video_note_and_sticker_are_visual_media(self):
         self.assertTrue(_is_unsupported_gif_or_video(fake_media_message(photo=False, animation=True)))
