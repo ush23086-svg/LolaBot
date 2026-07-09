@@ -49,6 +49,14 @@ class RuntimeFixesTest(unittest.IsolatedAsyncioTestCase):
             strip_generic_help_ending("Готово. Чем я могу помочь?"),
             "Готово.",
         )
+        self.assertEqual(
+            strip_generic_help_ending("Mana javob, sizga qanday yordam bera olaman?"),
+            "Mana javob",
+        )
+        self.assertEqual(
+            strip_generic_help_ending("Tayyor. Yana savolingiz bo‘lsa, bemalol so‘rang."),
+            "Tayyor.",
+        )
 
     def test_generic_only_reply_becomes_neutral(self):
         self.assertEqual(strip_generic_help_ending("Sizga qanday yordam beray?"), "Tushundim 🙂")
