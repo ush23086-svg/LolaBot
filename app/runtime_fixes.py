@@ -42,9 +42,23 @@ def _is_allowed_chat(chat_type: str, chat_id: int, main_group_id: int | None) ->
     return int(chat_id) == int(main_group_id)
 
 
-def _is_generic_help_segment(value: str) -> bool:
-    normalized = value.strip(" \t\n\r-—,.;:!?🙂😊😁😄😂🤝")
-    return bool(normalized and any(pattern.search(normalized) for pattern in _GENERIC_HELP_PATTERNS))
+def _strip_tail_noise(value: str) -> str:
+    return value.strip(" \t\n\r-—,.;:!?🙂😊😁😄😂🤝")
+
+
+def _clean_generic_prefix(value: str) -> str:
+    return value.rstrip(" \t\n\r🙂😊😁😄😂🤝").rstrip("-—,;:").rstrip()
+
+
+def _strip_one_generic_tail(value: str) -> str:
+    for pattern in _GENERIC_HELP_PATTERNS:
+        matches = list(pattern.finditer(value))
+        for match in reversed(matches):
+            tail = _strip_tail_noise(value[match.end() :])
+            if tail:
+                continue
+            return _clean_generic_prefix(value[: match.start()])
+    return value
 
 
 def strip_generic_help_ending(text: str) -> str:
@@ -52,16 +66,13 @@ def strip_generic_help_ending(text: str) -> str:
     if not answer:
         return answer
 
-    lines = answer.splitlines()
-    while lines and _is_generic_help_segment(lines[-1]):
-        lines.pop()
-    answer = "\n".join(lines).strip()
-
-    if answer:
-        parts = re.split(r"(?<=[.!?])\s+", answer)
-        while parts and _is_generic_help_segment(parts[-1]):
-            parts.pop()
-        answer = " ".join(part for part in parts if part).strip()
+    for _ in range(6):
+        cleaned = _strip_one_generic_tail(answer)
+        if cleaned == answer:
+            break
+        answer = cleaned
+        if not answer:
+            break
 
     return answer or "Tushundim 🙂"
 
@@ -116,12 +127,13 @@ class ContextAwareAIProvider(AIProvider):
         caption: str = "",
         reply_context: str = "",
     ) -> str:
-        return await self.base.analyze_image(
+        answer = await self.base.analyze_image(
             image_base64=image_base64,
             user_name=user_name,
             caption=caption,
             reply_context=reply_context,
         )
+        return strip_generic_help_ending(answer)
 
     async def generate_image(self, prompt: str, user_name: str) -> GeneratedImage:
         return await self.base.generate_image(prompt=prompt, user_name=user_name)
