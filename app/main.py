@@ -8,7 +8,7 @@ from aiogram.enums import ParseMode
 from app.config import OPENROUTER_DEFAULT_REASONING_MODEL, get_settings
 from app.handlers import common
 from app.middlewares.stats import StatsMiddleware
-from app.runtime_fixes import AllowedChatMiddleware, ContextAwareAIProvider, SafeStatsService
+from app.runtime_fixes import ContextAwareAIProvider, LolaContextMiddleware, SafeStatsService
 from app.services.ai_provider import build_ai_provider
 from app.services.meta_engine import CodmunityClient
 from app.services.stats_service import send_daily_reports
@@ -38,7 +38,7 @@ async def main() -> None:
     dp["codmunity_client"] = CodmunityClient(timeout=settings.codmunity_timeout)
     dp["stats_service"] = stats_service
     dp["settings"] = settings
-    dp.message.middleware(AllowedChatMiddleware())
+    dp.message.middleware(LolaContextMiddleware())
     dp.message.middleware(StatsMiddleware(stats_service))
     dp.include_router(common.router)
 
