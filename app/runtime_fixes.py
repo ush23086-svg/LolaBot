@@ -34,14 +34,6 @@ _GENERIC_HELP_PATTERNS = tuple(
 )
 
 
-def _is_allowed_chat(chat_type: str, chat_id: int, main_group_id: int | None) -> bool:
-    if chat_type == "private":
-        return True
-    if main_group_id is None:
-        return False
-    return int(chat_id) == int(main_group_id)
-
-
 def _strip_tail_noise(value: str) -> str:
     return value.strip(" \t\n\r-—,.;:!?🙂😊😁😄😂🤝")
 
@@ -77,7 +69,7 @@ def strip_generic_help_ending(text: str) -> str:
     return answer or "Tushundim 🙂"
 
 
-class AllowedChatMiddleware(BaseMiddleware):
+class LolaContextMiddleware(BaseMiddleware):
     async def __call__(
         self,
         handler,
@@ -86,11 +78,6 @@ class AllowedChatMiddleware(BaseMiddleware):
     ) -> Any:
         if not isinstance(event, Message):
             return await handler(event, data)
-
-        settings = data.get("settings")
-        main_group_id = getattr(settings, "main_group_id", None)
-        if not _is_allowed_chat(event.chat.type, event.chat.id, main_group_id):
-            return None
 
         chat_token: Token = _CURRENT_CHAT_ID.set(int(event.chat.id))
         user_id = event.from_user.id if event.from_user else None
@@ -156,11 +143,6 @@ class ContextAwareAIProvider(AIProvider):
 
 
 class SafeStatsService(StatsService):
-    def get_all_chat_ids(self) -> list[int]:
-        if not self.enabled or self.main_group_id is None:
-            return []
-        return [int(self.main_group_id)]
-
     def record_payment(
         self,
         user_id: int,
