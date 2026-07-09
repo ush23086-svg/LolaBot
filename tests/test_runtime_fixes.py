@@ -45,6 +45,14 @@ class RuntimeFixesTest(unittest.IsolatedAsyncioTestCase):
             "Mana javob.",
         )
         self.assertEqual(
+            strip_generic_help_ending("Mana javob. Sizga qanday yordam berolaman?"),
+            "Mana javob.",
+        )
+        self.assertEqual(
+            strip_generic_help_ending("Tushunarli. Sizga qanday yordam berishim mumkin?"),
+            "Tushunarli.",
+        )
+        self.assertEqual(
             strip_generic_help_ending("Готово. Чем я могу помочь?"),
             "Готово.",
         )
