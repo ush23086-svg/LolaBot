@@ -1345,7 +1345,7 @@ async def debug_chat_handler(message: Message, settings: Settings) -> None:
     )
 
 
-@router.message(Command("keys_status"))
+@router.message(Command("keys", "keys_status"))
 async def keys_status_handler(
     message: Message,
     ai_provider: AIProvider,
