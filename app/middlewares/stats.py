@@ -43,11 +43,15 @@ class StatsMiddleware(BaseMiddleware):
         if message.chat.type == "private":
             return
 
+        settings = data.get("settings")
+        main_group_id = getattr(settings, "main_group_id", None)
+        if main_group_id is None or int(message.chat.id) != int(main_group_id):
+            return
+
         user = message.from_user
         if not user or user.is_bot:
             return
 
-        settings = data.get("settings")
         text_parts = (message.text or "").split(maxsplit=1)
         command = text_parts[0].split("@", 1)[0].lower() if text_parts else ""
         if command in ADMIN_COMMANDS and getattr(settings, "owner_id", None) == user.id:
