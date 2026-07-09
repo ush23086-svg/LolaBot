@@ -144,6 +144,11 @@ class ContextAwareAIProvider(AIProvider):
 
 
 class SafeStatsService(StatsService):
+    def get_all_chat_ids(self) -> list[int]:
+        if not self.enabled or self.main_group_id is None:
+            return []
+        return [int(self.main_group_id)]
+
     def record_payment(
         self,
         user_id: int,
