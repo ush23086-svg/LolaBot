@@ -17,11 +17,12 @@ _CURRENT_USER_ID: ContextVar[int | None] = ContextVar("lola_current_user_id", de
 _GENERIC_HELP_PATTERNS = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
-        r"\bsizga qanday yordam bera olaman\b",
-        r"\bsizga qanday yordam beray\b",
+        r"\b(?:sizga|senga) qanday yordam ber(?:a olaman|olaman|ishim mumkin)\b",
+        r"\b(?:sizga|senga) qanday yordam beray\b",
         r"\byana qanday yordam kerak\b",
         r"\byana nimada yordam ber(?:ay|ishim mumkin)\b",
-        r"\byana savol(?:ingiz)? bo['‘’]?lsa\b",
+        r"\byana (?:biror )?savol(?:ingiz)? bo['‘’]?lsa\b",
+        r"\byordam kerak bo['‘’]?lsa ayt(?:ing)?\b",
         r"\bbemalol so['‘’]?ra(?:ng|vering)\b",
         r"\byana biror narsa kerak bo['‘’]?lsa\b",
         r"\bчем я могу помочь\b",
