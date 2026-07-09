@@ -4,7 +4,6 @@ from app.runtime_fixes import (
     ContextAwareAIProvider,
     _CURRENT_CHAT_ID,
     _CURRENT_USER_ID,
-    _is_allowed_chat,
     strip_generic_help_ending,
 )
 from app.services.ai_provider import AIProvider, GeneratedImage
@@ -60,12 +59,6 @@ class RuntimeFixesTest(unittest.IsolatedAsyncioTestCase):
 
     def test_generic_only_reply_becomes_neutral(self):
         self.assertEqual(strip_generic_help_ending("Sizga qanday yordam beray?"), "Tushundim 🙂")
-
-    def test_allowed_chat_scope(self):
-        self.assertTrue(_is_allowed_chat("private", 1, None))
-        self.assertTrue(_is_allowed_chat("supergroup", -1001, -1001))
-        self.assertFalse(_is_allowed_chat("group", -1002, -1001))
-        self.assertFalse(_is_allowed_chat("group", -1002, None))
 
     async def test_recent_memory_is_injected_and_tail_is_removed(self):
         base = FakeProvider("Davom etamiz. Yana nimada yordam beray?")
