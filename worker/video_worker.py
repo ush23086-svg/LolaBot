@@ -523,15 +523,20 @@ async def _process_job(
             logger.exception("Could not mark ignored video job_id=%s", job.id)
     except Exception as exc:
         logger.exception("Video job failed job_id=%s source=%s", job.id, job.source)
-        await asyncio.to_thread(
-            queue.mark_failed,
-            job.id,
-            str(exc),
-            attempts=job.attempts,
-            max_attempts=settings.max_attempts,
-            retry_delay_seconds=settings.retry_delay_seconds,
-            worker_id=settings.worker_id,
-        )
+        try:
+            await asyncio.to_thread(
+                queue.mark_failed,
+                job.id,
+                str(exc),
+                attempts=job.attempts,
+                max_attempts=settings.max_attempts,
+                retry_delay_seconds=settings.retry_delay_seconds,
+                worker_id=settings.worker_id,
+            )
+        except Exception:
+            # A transient database outage must not stop the PC worker loop.
+            # The processing lease remains recoverable after its timeout.
+            logger.exception("Could not mark failed video job_id=%s", job.id)
     finally:
         heartbeat.cancel()
         with suppress(asyncio.CancelledError, Exception):
