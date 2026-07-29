@@ -44,7 +44,7 @@ VIDEO_LINKS_ENABLED=true
 VIDEO_LINKS_CHAT_IDS=-1001234567890
 ```
 
-`VIDEO_LINKS_CHAT_IDS` bo'sh bo'lsa `MAIN_GROUP_ID` ishlatiladi. Bir nechta guruh uchun ID'larni vergul bilan yozish mumkin.
+`VIDEO_LINKS_CHAT_IDS` majburiy allow-list. Bo'sh bo'lsa funksiya yoqilmaydi. Bir nechta ruxsat berilgan guruh ID'sini vergul bilan yozish mumkin.
 
 ## Telegram ruxsatlari
 
