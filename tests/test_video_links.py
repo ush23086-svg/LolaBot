@@ -35,10 +35,10 @@ class VideoLinksTest(unittest.TestCase):
         result = classify_supported_url("https://x.com/test/status/123).")
         self.assertEqual(result, ("https://x.com/test/status/123", "x"))
 
-    def test_chat_id_allow_list_falls_back_to_main_group(self) -> None:
-        self.assertEqual(parse_chat_ids(None, -100123), {-100123})
+    def test_chat_id_allow_list_is_explicit_and_fail_closed(self) -> None:
+        self.assertEqual(parse_chat_ids(None), set())
         self.assertEqual(
-            parse_chat_ids("-1001, -1002 invalid; -1001", -1009),
+            parse_chat_ids("-1001, -1002 invalid; -1001"),
             {-1001, -1002},
         )
 
