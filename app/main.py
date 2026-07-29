@@ -52,7 +52,7 @@ async def main() -> None:
             logger.error("VIDEO_LINKS_ENABLED is true but DATABASE_URL is missing")
         elif not allowed_chat_ids:
             logger.error(
-                "VIDEO_LINKS_ENABLED is true but VIDEO_LINKS_CHAT_IDS and MAIN_GROUP_ID are empty"
+                "VIDEO_LINKS_ENABLED is true but VIDEO_LINKS_CHAT_IDS is empty"
             )
         else:
             try:
