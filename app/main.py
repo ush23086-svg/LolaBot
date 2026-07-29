@@ -6,12 +6,13 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from app.config import OPENROUTER_DEFAULT_REASONING_MODEL, get_settings
-from app.handlers import common
+from app.handlers import common, video_links
 from app.middlewares.stats import StatsMiddleware
 from app.runtime_fixes import ContextAwareAIProvider, LolaContextMiddleware, SafeStatsService
 from app.services.ai_provider import build_ai_provider
 from app.services.meta_engine import CodmunityClient
 from app.services.stats_service import send_daily_reports
+from app.services.video_queue import VideoQueueService
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,29 @@ async def main() -> None:
     dp["settings"] = settings
     dp.message.middleware(LolaContextMiddleware())
     dp.message.middleware(StatsMiddleware(stats_service))
+
+    # Automatic video links are fail-closed and isolated from Lola's AI path.
+    # The router is not installed until the feature, database and chat allow-list
+    # are all ready, so an incomplete setup cannot swallow normal conversations.
+    if settings.video_links_enabled:
+        video_queue = VideoQueueService(settings.database_url)
+        allowed_chat_ids = settings.video_link_chat_ids
+        if not video_queue.enabled:
+            logger.error("VIDEO_LINKS_ENABLED is true but DATABASE_URL is missing")
+        elif not allowed_chat_ids:
+            logger.error(
+                "VIDEO_LINKS_ENABLED is true but VIDEO_LINKS_CHAT_IDS and MAIN_GROUP_ID are empty"
+            )
+        else:
+            try:
+                await asyncio.to_thread(video_queue.init_db)
+            except Exception:
+                logger.exception("Failed to initialize automatic video queue; feature stays disabled")
+            else:
+                dp["video_queue"] = video_queue
+                dp.include_router(video_links.build_router(allowed_chat_ids))
+                logger.info("Automatic video links enabled for chat ids: %s", sorted(allowed_chat_ids))
+
     dp.include_router(common.router)
 
     await bot.delete_webhook(drop_pending_updates=True)
