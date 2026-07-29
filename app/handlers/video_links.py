@@ -37,6 +37,7 @@ def build_router(allowed_chat_ids: set[int]) -> Router:
                 video_queue.enqueue,
                 chat_id=message.chat.id,
                 message_id=message.message_id,
+                message_thread_id=message.message_thread_id,
                 user_id=message.from_user.id if message.from_user else None,
                 url=url,
                 source=source,
