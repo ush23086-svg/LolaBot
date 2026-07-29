@@ -156,7 +156,7 @@ class Settings(BaseSettings):
 
     @property
     def video_link_chat_ids(self) -> set[int]:
-        return parse_chat_ids(self.video_links_chat_ids_raw, self.main_group_id)
+        return parse_chat_ids(self.video_links_chat_ids_raw)
 
 
 def _clean_models(models: list[str | None]) -> list[str]:
