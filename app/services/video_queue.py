@@ -14,6 +14,7 @@ class VideoJob:
     id: int
     chat_id: int
     message_id: int
+    message_thread_id: int | None
     user_id: int | None
     url: str
     source: str
@@ -48,6 +49,7 @@ class VideoQueueService:
                         id BIGSERIAL PRIMARY KEY,
                         chat_id BIGINT NOT NULL,
                         message_id BIGINT NOT NULL,
+                        message_thread_id BIGINT,
                         user_id BIGINT,
                         url TEXT NOT NULL,
                         source TEXT NOT NULL,
@@ -66,6 +68,12 @@ class VideoQueueService:
                 )
                 cur.execute(
                     """
+                    ALTER TABLE video_jobs
+                    ADD COLUMN IF NOT EXISTS message_thread_id BIGINT;
+                    """
+                )
+                cur.execute(
+                    """
                     CREATE INDEX IF NOT EXISTS idx_video_jobs_ready
                     ON video_jobs (status, available_at, created_at);
                     """
@@ -77,6 +85,7 @@ class VideoQueueService:
         *,
         chat_id: int,
         message_id: int,
+        message_thread_id: int | None,
         user_id: int | None,
         url: str,
         source: str,
@@ -88,12 +97,19 @@ class VideoQueueService:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO video_jobs (chat_id, message_id, user_id, url, source)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO video_jobs (
+                        chat_id,
+                        message_id,
+                        message_thread_id,
+                        user_id,
+                        url,
+                        source
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (chat_id, message_id) DO NOTHING
                     RETURNING id;
                     """,
-                    (chat_id, message_id, user_id, url, source),
+                    (chat_id, message_id, message_thread_id, user_id, url, source),
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -137,6 +153,7 @@ class VideoQueueService:
                         job.id,
                         job.chat_id,
                         job.message_id,
+                        job.message_thread_id,
                         job.user_id,
                         job.url,
                         job.source,
@@ -153,6 +170,11 @@ class VideoQueueService:
             id=int(row["id"]),
             chat_id=int(row["chat_id"]),
             message_id=int(row["message_id"]),
+            message_thread_id=(
+                int(row["message_thread_id"])
+                if row["message_thread_id"] is not None
+                else None
+            ),
             user_id=int(row["user_id"]) if row["user_id"] is not None else None,
             url=str(row["url"]),
             source=str(row["source"]),
