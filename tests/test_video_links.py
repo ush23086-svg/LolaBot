@@ -1,5 +1,8 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+from app.handlers.common import _should_answer_text
 from app.services.video_links import (
     classify_supported_url,
     extract_supported_url,
@@ -38,6 +41,42 @@ class VideoLinksTest(unittest.TestCase):
             parse_chat_ids("-1001, -1002 invalid; -1001", -1009),
             {-1001, -1002},
         )
+
+
+class VideoDiscussionRoutingTest(unittest.IsolatedAsyncioTestCase):
+    async def test_plain_reply_to_bot_video_is_not_an_ai_prompt(self) -> None:
+        bot = SimpleNamespace(
+            me=AsyncMock(
+                return_value=SimpleNamespace(id=42, username="lola_bot")
+            )
+        )
+        message = SimpleNamespace(
+            chat=SimpleNamespace(type="supergroup", id=-1001),
+            text="zo'r video ekan",
+            reply_to_message=SimpleNamespace(
+                from_user=SimpleNamespace(id=42),
+                video=object(),
+            ),
+        )
+
+        self.assertFalse(await _should_answer_text(message, bot))
+
+    async def test_explicit_mention_under_bot_video_still_works(self) -> None:
+        bot = SimpleNamespace(
+            me=AsyncMock(
+                return_value=SimpleNamespace(id=42, username="lola_bot")
+            )
+        )
+        message = SimpleNamespace(
+            chat=SimpleNamespace(type="supergroup", id=-1001),
+            text="@lola_bot shu haqida ayt",
+            reply_to_message=SimpleNamespace(
+                from_user=SimpleNamespace(id=42),
+                video=object(),
+            ),
+        )
+
+        self.assertTrue(await _should_answer_text(message, bot))
 
 
 if __name__ == "__main__":
