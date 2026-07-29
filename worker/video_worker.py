@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -386,17 +387,37 @@ async def _mark_sent_with_retry(
     queue: VideoQueueService,
     job_id: int,
     sent_message_id: int,
+    worker_id: str,
 ) -> None:
     last_error: Exception | None = None
-    for attempt in range(1, 6):
+    for attempt in range(1, 13):
         try:
-            await asyncio.to_thread(queue.mark_sent, job_id, sent_message_id)
+            await asyncio.to_thread(queue.mark_sent, job_id, sent_message_id, worker_id)
             return
         except Exception as exc:  # pragma: no cover - requires DB outage
             last_error = exc
             logger.exception("mark_sent failed job_id=%s attempt=%s", job_id, attempt)
-            await asyncio.sleep(min(2**attempt, 15))
+            await asyncio.sleep(min(2**attempt, 30))
     raise RuntimeError("sent video could not be committed to database") from last_error
+
+
+async def _lease_heartbeat(
+    queue: VideoQueueService,
+    job_id: int,
+    worker_id: str,
+    lease_timeout_minutes: int,
+) -> None:
+    interval = max(10.0, min(60.0, lease_timeout_minutes * 20.0))
+    while True:
+        await asyncio.sleep(interval)
+        renewed = await asyncio.to_thread(queue.renew_lease, job_id, worker_id)
+        if not renewed:
+            raise RuntimeError("video job lease was lost")
+
+
+def _raise_if_heartbeat_failed(task: asyncio.Task) -> None:
+    if task.done():
+        task.result()
 
 
 async def _process_job(
@@ -414,6 +435,14 @@ async def _process_job(
         job.chat_id,
     )
 
+    heartbeat = asyncio.create_task(
+        _lease_heartbeat(
+            queue,
+            job.id,
+            settings.worker_id,
+            settings.lease_timeout_minutes,
+        )
+    )
     try:
         with tempfile.TemporaryDirectory(prefix=f"lola-video-{job.id}-") as temp_dir:
             work_dir = Path(temp_dir)
@@ -424,6 +453,7 @@ async def _process_job(
                 ffmpeg_path,
                 settings,
             )
+            _raise_if_heartbeat_failed(heartbeat)
             prepared = await asyncio.to_thread(
                 _prepare_telegram_video,
                 source_video,
@@ -433,13 +463,35 @@ async def _process_job(
                 settings,
             )
 
+            _raise_if_heartbeat_failed(heartbeat)
             sent = await bot.send_video(
                 chat_id=job.chat_id,
                 message_thread_id=job.message_thread_id,
                 video=FSInputFile(prepared, filename="video.mp4"),
                 supports_streaming=True,
             )
-            await _mark_sent_with_retry(queue, job.id, sent.message_id)
+            try:
+                await _mark_sent_with_retry(
+                    queue,
+                    job.id,
+                    sent.message_id,
+                    settings.worker_id,
+                )
+            except Exception:
+                # If delivery cannot be recorded, remove the just-sent video so
+                # a later lease retry cannot leave a duplicate in the group.
+                try:
+                    await bot.delete_message(
+                        chat_id=job.chat_id,
+                        message_id=sent.message_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Could not compensate uncommitted video job_id=%s sent_message_id=%s",
+                        job.id,
+                        sent.message_id,
+                    )
+                raise
 
             try:
                 await bot.delete_message(chat_id=job.chat_id, message_id=job.message_id)
@@ -460,7 +512,15 @@ async def _process_job(
             )
     except PermanentJobError as exc:
         logger.warning("Video job ignored job_id=%s reason=%s", job.id, exc)
-        await asyncio.to_thread(queue.mark_ignored, job.id, str(exc))
+        try:
+            await asyncio.to_thread(
+                queue.mark_ignored,
+                job.id,
+                str(exc),
+                settings.worker_id,
+            )
+        except Exception:
+            logger.exception("Could not mark ignored video job_id=%s", job.id)
     except Exception as exc:
         logger.exception("Video job failed job_id=%s source=%s", job.id, job.source)
         await asyncio.to_thread(
@@ -470,7 +530,12 @@ async def _process_job(
             attempts=job.attempts,
             max_attempts=settings.max_attempts,
             retry_delay_seconds=settings.retry_delay_seconds,
+            worker_id=settings.worker_id,
         )
+    finally:
+        heartbeat.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await heartbeat
 
 
 async def run_worker() -> None:
@@ -497,6 +562,7 @@ async def run_worker() -> None:
                     queue.claim_next,
                     settings.worker_id,
                     settings.lease_timeout_minutes,
+                    settings.max_attempts,
                 )
             except Exception:
                 logger.exception("Video queue claim failed")
