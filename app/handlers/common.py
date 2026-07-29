@@ -201,6 +201,10 @@ async def _should_answer_text(message: Message, bot: Bot) -> bool:
         message.reply_to_message
         and message.reply_to_message.from_user
         and message.reply_to_message.from_user.id == me.id
+        # Automatic videos are sent by Lola, but ordinary discussion under them
+        # must not become an implicit AI prompt. Explicit @mentions and the
+        # existing exact "Lola" wake-up rule still work.
+        and not message.reply_to_message.video
     )
     bot_username = (me.username or "").lower()
     text = message.text or ""
