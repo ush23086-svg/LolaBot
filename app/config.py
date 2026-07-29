@@ -3,6 +3,8 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.services.video_links import parse_chat_ids
+
 OPENROUTER_DEFAULT_CHAT_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
 OPENROUTER_DEFAULT_FALLBACK_MODEL = "google/gemma-3-27b-it"
 OPENROUTER_DEFAULT_VISION_MODELS = [
@@ -81,6 +83,8 @@ class Settings(BaseSettings):
     bot_name: str = Field(default="Lola", alias="BOT_NAME")
     main_group_id: int | None = Field(default=None, alias="MAIN_GROUP_ID")
     owner_id: int | None = Field(default=None, alias="OWNER_ID")
+    video_links_enabled: bool = Field(default=False, alias="VIDEO_LINKS_ENABLED")
+    video_links_chat_ids_raw: str | None = Field(default=None, alias="VIDEO_LINKS_CHAT_IDS")
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -149,6 +153,10 @@ class Settings(BaseSettings):
     @property
     def image_models(self) -> list[str]:
         return _clean_models([self.image_model_1, self.image_model_2]) or OPENROUTER_DEFAULT_IMAGE_MODELS
+
+    @property
+    def video_link_chat_ids(self) -> set[int]:
+        return parse_chat_ids(self.video_links_chat_ids_raw, self.main_group_id)
 
 
 def _clean_models(models: list[str | None]) -> list[str]:
