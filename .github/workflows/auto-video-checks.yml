@@ -10,7 +10,7 @@ on:
       - "app/services/video_links.py"
       - "app/services/video_queue.py"
       - "worker/**"
-      - "tests/test_video_links.py"
+      - "tests/**"
       - ".github/workflows/auto-video-checks.yml"
   workflow_dispatch:
 
