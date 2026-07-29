@@ -1,4 +1,5 @@
 .env
+.env.worker
 .venv/
 venv/
 __pycache__/
@@ -7,3 +8,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 *.log
+cookies.txt
+downloads/
+work/
+video_worker_data/
