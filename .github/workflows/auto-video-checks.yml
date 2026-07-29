@@ -1,0 +1,42 @@
+name: Auto video checks
+
+on:
+  pull_request:
+    paths:
+      - "app/config.py"
+      - "app/main.py"
+      - "app/handlers/video_links.py"
+      - "app/services/video_links.py"
+      - "app/services/video_queue.py"
+      - "worker/**"
+      - "tests/test_video_links.py"
+      - ".github/workflows/auto-video-checks.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r worker/requirements.txt
+      - name: Compile and unit test
+        run: |
+          python -m compileall -q app worker
+          python -m unittest tests.test_video_links
+      - name: Import smoke test
+        run: |
+          python - <<'PY'
+          from app.handlers.video_links import build_router
+          import worker.video_worker
+
+          build_router({-1001234567890})
+          print("automatic video imports OK")
+          PY
