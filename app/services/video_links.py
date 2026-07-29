@@ -80,8 +80,8 @@ def extract_supported_url(text: str | None) -> tuple[str, str] | None:
     return None
 
 
-def parse_chat_ids(raw: str | None, fallback_chat_id: int | None = None) -> set[int]:
-    """Parse comma/space separated chat IDs, falling back to MAIN_GROUP_ID."""
+def parse_chat_ids(raw: str | None) -> set[int]:
+    """Parse the explicit comma/space separated video chat allow-list."""
 
     values: set[int] = set()
     if raw:
@@ -93,6 +93,4 @@ def parse_chat_ids(raw: str | None, fallback_chat_id: int | None = None) -> set[
             except ValueError:
                 continue
 
-    if not values and fallback_chat_id is not None:
-        values.add(int(fallback_chat_id))
     return values
