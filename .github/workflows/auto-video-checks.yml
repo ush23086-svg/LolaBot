@@ -6,6 +6,7 @@ on:
       - "app/config.py"
       - "app/main.py"
       - "app/handlers/video_links.py"
+      - "app/handlers/common.py"
       - "app/services/video_links.py"
       - "app/services/video_queue.py"
       - "worker/**"
@@ -30,7 +31,7 @@ jobs:
       - name: Compile and unit test
         run: |
           python -m compileall -q app worker
-          python -m unittest tests.test_video_links
+          python -m unittest discover -s tests -v
       - name: Import smoke test
         run: |
           python - <<'PY'
