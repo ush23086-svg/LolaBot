@@ -116,25 +116,51 @@ class VideoQueueService:
 
         return int(row["id"]) if row else None
 
-    def claim_next(self, worker_id: str, lease_timeout_minutes: int = 30) -> VideoJob | None:
+    def claim_next(
+        self,
+        worker_id: str,
+        lease_timeout_minutes: int = 30,
+        max_attempts: int = 3,
+    ) -> VideoJob | None:
         if not self.enabled:
             return None
 
         lease_timeout_minutes = max(5, int(lease_timeout_minutes))
+        max_attempts = max(1, int(max_attempts))
         with self._connect() as conn:
             with conn.cursor() as cur:
+                # A worker that repeatedly dies must not bypass the retry cap
+                # merely because its lease expires.
+                cur.execute(
+                    """
+                    UPDATE video_jobs
+                    SET
+                        status = 'failed',
+                        leased_at = NULL,
+                        worker_id = NULL,
+                        last_error = COALESCE(last_error, 'lease expired at retry limit'),
+                        updated_at = NOW()
+                    WHERE status = 'processing'
+                      AND attempts >= %s
+                      AND leased_at < NOW() - (%s * INTERVAL '1 minute');
+                    """,
+                    (max_attempts, lease_timeout_minutes),
+                )
                 cur.execute(
                     """
                     WITH candidate AS (
                         SELECT id
                         FROM video_jobs
-                        WHERE (
-                            status = 'pending'
-                            AND available_at <= NOW()
-                        ) OR (
-                            status = 'processing'
-                            AND leased_at < NOW() - (%s * INTERVAL '1 minute')
-                        )
+                        WHERE attempts < %s
+                          AND (
+                            (
+                                status = 'pending'
+                                AND available_at <= NOW()
+                            ) OR (
+                                status = 'processing'
+                                AND leased_at < NOW() - (%s * INTERVAL '1 minute')
+                            )
+                          )
                         ORDER BY created_at ASC
                         FOR UPDATE SKIP LOCKED
                         LIMIT 1
@@ -159,7 +185,7 @@ class VideoQueueService:
                         job.source,
                         job.attempts;
                     """,
-                    (lease_timeout_minutes, worker_id),
+                    (max_attempts, lease_timeout_minutes, worker_id),
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -181,7 +207,30 @@ class VideoQueueService:
             attempts=int(row["attempts"]),
         )
 
-    def mark_sent(self, job_id: int, sent_message_id: int) -> None:
+    def renew_lease(self, job_id: int, worker_id: str) -> bool:
+        """Keep a long-running download/upload from being claimed twice."""
+
+        if not self.enabled:
+            return False
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE video_jobs
+                    SET leased_at = NOW(), updated_at = NOW()
+                    WHERE id = %s
+                      AND status = 'processing'
+                      AND worker_id = %s
+                    RETURNING id;
+                    """,
+                    (job_id, worker_id),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        return row is not None
+
+    def mark_sent(self, job_id: int, sent_message_id: int, worker_id: str) -> None:
         if not self.enabled:
             return
 
@@ -196,11 +245,17 @@ class VideoQueueService:
                         leased_at = NULL,
                         updated_at = NOW(),
                         last_error = NULL
-                    WHERE id = %s;
+                    WHERE id = %s
+                      AND status = 'processing'
+                      AND worker_id = %s
+                    RETURNING id;
                     """,
-                    (sent_message_id, job_id),
+                    (sent_message_id, job_id, worker_id),
                 )
+                row = cur.fetchone()
             conn.commit()
+        if row is None:
+            raise RuntimeError("video job lease was lost before mark_sent")
 
     def mark_failed(
         self,
@@ -210,6 +265,7 @@ class VideoQueueService:
         attempts: int,
         max_attempts: int = 3,
         retry_delay_seconds: int = 90,
+        worker_id: str,
     ) -> None:
         if not self.enabled:
             return
@@ -234,13 +290,15 @@ class VideoQueueService:
                         worker_id = NULL,
                         last_error = %s,
                         updated_at = NOW()
-                    WHERE id = %s;
+                    WHERE id = %s
+                      AND status = 'processing'
+                      AND worker_id = %s;
                     """,
-                    (next_status, next_status, delay, safe_error, job_id),
+                    (next_status, next_status, delay, safe_error, job_id, worker_id),
                 )
             conn.commit()
 
-    def mark_ignored(self, job_id: int, reason: str) -> None:
+    def mark_ignored(self, job_id: int, reason: str, worker_id: str) -> None:
         if not self.enabled:
             return
 
@@ -255,8 +313,10 @@ class VideoQueueService:
                         worker_id = NULL,
                         last_error = %s,
                         updated_at = NOW()
-                    WHERE id = %s;
+                    WHERE id = %s
+                      AND status = 'processing'
+                      AND worker_id = %s;
                     """,
-                    ((reason or "ignored")[:1000], job_id),
+                    ((reason or "ignored")[:1000], job_id, worker_id),
                 )
             conn.commit()
