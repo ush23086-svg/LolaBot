@@ -4,12 +4,22 @@ import asyncio
 import logging
 
 from aiogram import F, Router
+from aiogram.filters import Filter
 from aiogram.types import Message
 
-from app.services.video_links import SUPPORTED_LINK_PATTERN, extract_supported_url
+from app.services.video_links import extract_supported_url
 from app.services.video_queue import VideoQueueService
 
 logger = logging.getLogger(__name__)
+
+
+class SupportedVideoLinkFilter(Filter):
+    async def __call__(self, message: Message) -> bool | dict[str, str]:
+        extracted = extract_supported_url(message.text)
+        if extracted is None:
+            return False
+        url, source = extracted
+        return {"video_url": url, "video_source": source}
 
 
 def build_router(allowed_chat_ids: set[int]) -> Router:
@@ -21,17 +31,17 @@ def build_router(allowed_chat_ids: set[int]) -> Router:
     @router.message(
         F.chat.type.in_({"group", "supergroup"}),
         F.chat.id.in_(allowed_ids),
-        F.text.regexp(SUPPORTED_LINK_PATTERN),
+        SupportedVideoLinkFilter(),
     )
-    async def queue_video_link(message: Message, video_queue: VideoQueueService) -> None:
+    async def queue_video_link(
+        message: Message,
+        video_queue: VideoQueueService,
+        video_url: str,
+        video_source: str,
+    ) -> None:
         if message.from_user and message.from_user.is_bot:
             return
 
-        extracted = extract_supported_url(message.text)
-        if extracted is None:
-            return
-
-        url, source = extracted
         try:
             job_id = await asyncio.to_thread(
                 video_queue.enqueue,
@@ -39,8 +49,8 @@ def build_router(allowed_chat_ids: set[int]) -> Router:
                 message_id=message.message_id,
                 message_thread_id=message.message_thread_id,
                 user_id=message.from_user.id if message.from_user else None,
-                url=url,
-                source=source,
+                url=video_url,
+                source=video_source,
             )
         except Exception:
             # Fail silently in Telegram: the original link stays visible and the
@@ -49,7 +59,7 @@ def build_router(allowed_chat_ids: set[int]) -> Router:
                 "Failed to queue automatic video chat_id=%s message_id=%s source=%s",
                 message.chat.id,
                 message.message_id,
-                source,
+                video_source,
             )
             return
 
@@ -58,7 +68,7 @@ def build_router(allowed_chat_ids: set[int]) -> Router:
             job_id,
             message.chat.id,
             message.message_id,
-            source,
+            video_source,
         )
 
     return router
