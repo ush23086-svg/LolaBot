@@ -1048,6 +1048,24 @@ def _memory_summary(user_text: str, answer: str) -> str:
     return f"Oxirgi mavzu: user '{user_text[:300]}'; Lola '{answer[:500]}'".replace("\n", " ")[:1000]
 
 
+def _owner_global_memory_candidate(text: str) -> tuple[str, str] | None:
+    clean = " ".join((text or "").split()).strip()
+    if not clean:
+        return None
+
+    normalized = normalize_text(clean)
+    explicit = bool(OWNER_MEMORY_RE.search(clean))
+    group_rule = bool(OWNER_GROUP_RULE_RE.search(clean))
+
+    if group_rule:
+        return "group_rule", clean[:600]
+    if explicit:
+        return "personal", clean[:600]
+    if any(marker in normalized for marker in ("menyoqtiraman", "menyoqtirmayman", "ismim", "laqabim")):
+        return "personal", clean[:600]
+    return None
+
+
 async def _save_memory(message: Message, stats_service: StatsService, user_text: str, answer: str) -> None:
     user = message.from_user
     if not user or user.is_bot:
