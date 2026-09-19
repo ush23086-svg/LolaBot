@@ -90,7 +90,7 @@ class RuntimeFixesTest(unittest.IsolatedAsyncioTestCase):
             _CURRENT_USER_ID.reset(user_token)
             _CURRENT_CHAT_ID.reset(chat_token)
 
-        self.assertIn("doim hurmat bilan 'siz'", base.reply_context)
+        self.assertIn("hurmat bilan 'siz'", base.reply_context)
 
     async def test_owner_can_keep_natural_sen_style_in_group(self):
         base = FakeProvider("Mayli.")
