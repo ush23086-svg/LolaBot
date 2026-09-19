@@ -65,6 +65,31 @@ class StatsService:
                 )
                 cur.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS bot_conversation_turns (
+                        id BIGSERIAL PRIMARY KEY,
+                        chat_id BIGINT NOT NULL,
+                        user_id BIGINT NOT NULL,
+                        role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+                        content TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS bot_conversation_turns_chat_user_time_idx
+                    ON bot_conversation_turns (chat_id, user_id, created_at DESC);
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS bot_conversation_turns_fts_idx
+                    ON bot_conversation_turns
+                    USING GIN (to_tsvector('simple', content));
+                    """
+                )
+                cur.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS bot_usage_limits (
                         chat_id BIGINT NOT NULL,
                         user_id BIGINT NOT NULL,
@@ -376,6 +401,160 @@ class StatsService:
                 )
                 row = cur.fetchone()
                 return dict(row) if row else None
+
+    def save_exchange(
+        self,
+        chat_id: int,
+        user_id: int,
+        user_text: str,
+        answer: str,
+        summary: str | None = None,
+    ) -> None:
+        if not self.enabled:
+            return
+
+        clean_user = (user_text or "").strip()
+        clean_answer = (answer or "").strip()
+        clean_summary = (summary or "").strip()
+        if not clean_user and not clean_answer and not clean_summary:
+            return
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                if clean_user:
+                    cur.execute(
+                        """
+                        INSERT INTO bot_conversation_turns (chat_id, user_id, role, content)
+                        VALUES (%s, %s, 'user', %s);
+                        """,
+                        (chat_id, user_id, clean_user[:4000]),
+                    )
+                if clean_answer:
+                    cur.execute(
+                        """
+                        INSERT INTO bot_conversation_turns (chat_id, user_id, role, content)
+                        VALUES (%s, %s, 'assistant', %s);
+                        """,
+                        (chat_id, user_id, clean_answer[:4000]),
+                    )
+                if clean_summary:
+                    cur.execute(
+                        """
+                        INSERT INTO bot_memory (chat_id, user_id, summary, updated_at)
+                        VALUES (%s, %s, %s, NOW())
+                        ON CONFLICT (chat_id, user_id)
+                        DO UPDATE SET summary = EXCLUDED.summary, updated_at = NOW();
+                        """,
+                        (chat_id, user_id, clean_summary[:1200]),
+                    )
+            conn.commit()
+
+    def get_memory_context(
+        self,
+        chat_id: int,
+        user_id: int,
+        query: str = "",
+        recent_limit: int = 8,
+        relevant_limit: int = 6,
+        max_chars: int = 6000,
+    ) -> str | None:
+        if not self.enabled:
+            return None
+
+        recent_limit = max(1, min(int(recent_limit), 20))
+        relevant_limit = max(0, min(int(relevant_limit), 12))
+        max_chars = max(1000, min(int(max_chars), 12000))
+        search_text = (query or "").strip()
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, role, content, created_at
+                    FROM bot_conversation_turns
+                    WHERE chat_id = %s AND user_id = %s
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT %s;
+                    """,
+                    (chat_id, user_id, recent_limit),
+                )
+                recent_rows = list(cur.fetchall())
+
+                relevant_rows: list[dict] = []
+                if search_text and relevant_limit:
+                    cur.execute(
+                        """
+                        SELECT id, role, content, created_at,
+                               ts_rank_cd(
+                                   to_tsvector('simple', content),
+                                   plainto_tsquery('simple', %s)
+                               ) AS rank
+                        FROM bot_conversation_turns
+                        WHERE chat_id = %s
+                          AND user_id = %s
+                          AND to_tsvector('simple', content) @@ plainto_tsquery('simple', %s)
+                          AND id NOT IN (
+                              SELECT id
+                              FROM bot_conversation_turns
+                              WHERE chat_id = %s AND user_id = %s
+                              ORDER BY created_at DESC, id DESC
+                              LIMIT %s
+                          )
+                        ORDER BY rank DESC, created_at DESC
+                        LIMIT %s;
+                        """,
+                        (
+                            search_text,
+                            chat_id,
+                            user_id,
+                            search_text,
+                            chat_id,
+                            user_id,
+                            recent_limit,
+                            relevant_limit,
+                        ),
+                    )
+                    relevant_rows = list(cur.fetchall())
+
+                cur.execute(
+                    """
+                    SELECT summary
+                    FROM bot_memory
+                    WHERE chat_id = %s AND user_id = %s;
+                    """,
+                    (chat_id, user_id),
+                )
+                memory_row = cur.fetchone()
+
+        def format_turn(row: dict) -> str:
+            created_at = row.get("created_at")
+            if created_at is not None:
+                try:
+                    when = created_at.astimezone(TZ).strftime("%Y-%m-%d %H:%M")
+                except Exception:
+                    when = str(created_at)
+            else:
+                when = "oldin"
+            role = "User" if row.get("role") == "user" else "Lola"
+            content = str(row.get("content") or "").replace("\n", " ").strip()
+            return f"[{when}] {role}: {content[:700]}"
+
+        sections: list[str] = []
+        if memory_row and memory_row.get("summary"):
+            sections.append(f"Qisqa xotira:\n{str(memory_row['summary'])[:900]}")
+
+        if relevant_rows:
+            relevant_lines = "\n".join(format_turn(row) for row in relevant_rows)
+            sections.append(f"Oldingi tegishli suhbatlar:\n{relevant_lines[:2200]}")
+
+        if recent_rows:
+            recent_lines = "\n".join(format_turn(row) for row in reversed(recent_rows))
+            sections.append(f"Oxirgi suhbatlar:\n{recent_lines[-3000:]}")
+
+        if not sections:
+            return None
+
+        return "\n\n".join(sections)[:max_chars]
 
     def update_memory(self, chat_id: int, user_id: int, summary: str) -> None:
         if not self.enabled or not summary.strip():
