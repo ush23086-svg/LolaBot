@@ -1082,14 +1082,27 @@ async def _save_memory(message: Message, stats_service: StatsService, user_text:
                 answer,
                 _memory_summary(user_text, answer),
             )
-            return
+        else:
+            await asyncio.to_thread(
+                stats_service.update_memory,
+                message.chat.id,
+                user.id,
+                _memory_summary(user_text, answer),
+            )
 
-        await asyncio.to_thread(
-            stats_service.update_memory,
-            message.chat.id,
-            user.id,
-            _memory_summary(user_text, answer),
-        )
+        owner_id = getattr(stats_service, "owner_id", None)
+        owner_saver = getattr(stats_service, "save_owner_global_memory", None)
+        if owner_id is not None and int(user.id) == int(owner_id) and callable(owner_saver):
+            candidate = _owner_global_memory_candidate(user_text)
+            if candidate is not None:
+                category, content = candidate
+                await asyncio.to_thread(
+                    owner_saver,
+                    int(owner_id),
+                    category,
+                    content,
+                    int(message.chat.id),
+                )
     except Exception:
         logger.exception("Failed to update memory for chat %s", message.chat.id)
 
