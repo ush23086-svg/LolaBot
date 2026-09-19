@@ -21,6 +21,7 @@ from aiogram.types import (
     LabeledPrice,
     Message,
     PreCheckoutQuery,
+    ReplyParameters,
 )
 
 from app.config import Settings
@@ -1048,6 +1049,106 @@ def _memory_summary(user_text: str, answer: str) -> str:
     return f"Oxirgi mavzu: user '{user_text[:300]}'; Lola '{answer[:500]}'".replace("\n", " ")[:1000]
 
 
+def _parse_owner_group_reply_action(text: str) -> tuple[str, str] | None:
+    clean = " ".join((text or "").split()).strip()
+    if not clean:
+        return None
+
+    target_match = re.search(
+        r"\bguruhda\s+(.+?)\s+(?:oxirgi|ohirgi)\b",
+        clean,
+        re.IGNORECASE,
+    )
+    if target_match is None:
+        target_match = re.search(
+            r"\b(.+?)(?:ning)?\s+guruhdagi\s+(?:oxirgi|ohirgi)\b",
+            clean,
+            re.IGNORECASE,
+        )
+    if target_match is None:
+        return None
+
+    reply_match = re.search(
+        r"\b(?:reply|javob)\b(?:\s+qilib)?\s+(.+?)\s+deb\s+yoz",
+        clean,
+        re.IGNORECASE,
+    )
+    if reply_match is None:
+        return None
+
+    target = target_match.group(1).strip(" ,.!?:;\"'“”")
+    target = re.sub(r"\s+(?:ga|ni|ning)$", "", target, flags=re.IGNORECASE).strip()
+    reply_text = reply_match.group(1).strip(" ,.!?:;\"'“”")
+    if not target or not reply_text:
+        return None
+    return target[:100], reply_text[:1000]
+
+
+async def _handle_owner_group_reply_action(
+    message: Message,
+    bot: Bot,
+    stats_service: StatsService,
+    target_name: str,
+    reply_text: str,
+) -> bool:
+    user = message.from_user
+    owner_id = getattr(stats_service, "owner_id", None)
+    if message.chat.type != "private" or not user or owner_id is None or int(user.id) != int(owner_id):
+        return False
+
+    group_id = getattr(stats_service, "main_group_id", None)
+    if group_id is None:
+        await message.reply("Asosiy guruh hali MAIN_GROUP_ID bilan belgilanmagan.")
+        return True
+
+    finder = getattr(stats_service, "find_group_members", None)
+    if not callable(finder):
+        await message.reply("Guruhdagi odamlarni topish moduli hali ulanmagan.")
+        return True
+
+    matches = await asyncio.to_thread(finder, int(group_id), target_name, 5)
+    if not matches:
+        await message.reply(
+            f"{target_name}ni hali o‘sha guruhda ko‘rmaganman. U bir marta yozsa, keyin topaman 😂"
+        )
+        return True
+
+    if len(matches) > 1 and int(matches[0].get("match_rank", 99)) == int(matches[1].get("match_rank", 99)):
+        names = []
+        for row in matches[:3]:
+            username = f" @{row['username']}" if row.get("username") else ""
+            names.append(f"{row['display_name']}{username}")
+        await message.reply(
+            "Bir nechta mos odam topildi: " + ", ".join(names) + ". Qaysi birini nazarda tutdingiz?"
+        )
+        return True
+
+    target = matches[0]
+    try:
+        await bot.send_message(
+            chat_id=int(group_id),
+            text=reply_text,
+            reply_parameters=ReplyParameters(
+                message_id=int(target["last_message_id"]),
+                allow_sending_without_reply=False,
+            ),
+        )
+    except Exception:
+        logger.exception(
+            "Owner group reply action failed group=%s target_user=%s message=%s",
+            group_id,
+            target.get("user_id"),
+            target.get("last_message_id"),
+        )
+        await message.reply("Guruhdagi o‘sha xabarga reply yubora olmadim.")
+        return True
+
+    await message.reply(
+        f"Yozdim 😂 {target['display_name']}ning eng oxirgi xabariga reply qildim."
+    )
+    return True
+
+
 def _owner_global_memory_candidate(text: str) -> tuple[str, str] | None:
     clean = " ".join((text or "").split()).strip()
     if not clean:
@@ -1056,7 +1157,14 @@ def _owner_global_memory_candidate(text: str) -> tuple[str, str] | None:
     normalized = normalize_text(clean)
     explicit = bool(OWNER_MEMORY_RE.search(clean))
     group_rule = bool(OWNER_GROUP_RULE_RE.search(clean))
+    one_time_group_action = (
+        "reply" in normalized
+        and ("oxirgi" in normalized or "ohirgi" in normalized)
+        and "yoz" in normalized
+    )
 
+    if one_time_group_action and not explicit:
+        return None
     if group_rule:
         return "group_rule", clean[:600]
     if explicit:
@@ -1661,6 +1769,18 @@ async def text_handler(
     if not text.strip():
         await message.reply("Aniqroq yozing.")
         return
+
+    owner_action = _parse_owner_group_reply_action(text)
+    if owner_action is not None:
+        target_name, reply_text = owner_action
+        if await _handle_owner_group_reply_action(
+            message,
+            bot,
+            stats_service,
+            target_name,
+            reply_text,
+        ):
+            return
 
     forced = _forced_style_reply(text)
     if forced:
