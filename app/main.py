@@ -27,7 +27,11 @@ async def main() -> None:
     )
     dp = Dispatcher()
 
-    stats_service = SafeStatsService(settings.database_url, main_group_id=settings.main_group_id)
+    stats_service = SafeStatsService(
+        settings.database_url,
+        main_group_id=settings.main_group_id,
+        owner_id=settings.owner_id,
+    )
     try:
         await asyncio.to_thread(stats_service.init_db)
     except Exception:
