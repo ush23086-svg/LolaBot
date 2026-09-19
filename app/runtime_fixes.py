@@ -84,7 +84,8 @@ class LolaContextMiddleware(BaseMiddleware):
         chat_token: Token = _CURRENT_CHAT_ID.set(int(event.chat.id))
         user_id = event.from_user.id if event.from_user else None
         user_token: Token = _CURRENT_USER_ID.set(user_id)
-        chat_type_token: Token = _CURRENT_CHAT_TYPE.set(str(event.chat.type))
+        chat_type = getattr(event.chat.type, "value", event.chat.type)
+        chat_type_token: Token = _CURRENT_CHAT_TYPE.set(str(chat_type))
         try:
             return await handler(event, data)
         finally:
