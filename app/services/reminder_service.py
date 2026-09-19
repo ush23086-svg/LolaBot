@@ -44,7 +44,11 @@ def parse_reminder_request(text: str, now: datetime | None = None) -> ReminderRe
 
     day_match = _DAY_RE.search(raw)
     relative_match = _RELATIVE_RE.search(raw)
-    time_match = _TIME_RE.search(raw)
+    time_source = raw
+    if relative_match:
+        start, end = relative_match.span()
+        time_source = f"{raw[:start]} {raw[end:]}"
+    time_match = _TIME_RE.search(time_source)
 
     if relative_match:
         count = int(relative_match.group("count"))
