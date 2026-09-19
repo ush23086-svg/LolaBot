@@ -13,6 +13,7 @@ from app.services.stats_service import StatsService
 
 _CURRENT_CHAT_ID: ContextVar[int | None] = ContextVar("lola_current_chat_id", default=None)
 _CURRENT_USER_ID: ContextVar[int | None] = ContextVar("lola_current_user_id", default=None)
+_CURRENT_CHAT_TYPE: ContextVar[str | None] = ContextVar("lola_current_chat_type", default=None)
 
 _GENERIC_HELP_PATTERNS = tuple(
     re.compile(pattern, re.IGNORECASE)
@@ -83,20 +84,32 @@ class LolaContextMiddleware(BaseMiddleware):
         chat_token: Token = _CURRENT_CHAT_ID.set(int(event.chat.id))
         user_id = event.from_user.id if event.from_user else None
         user_token: Token = _CURRENT_USER_ID.set(user_id)
+        chat_type_token: Token = _CURRENT_CHAT_TYPE.set(str(event.chat.type))
         try:
             return await handler(event, data)
         finally:
+            _CURRENT_CHAT_TYPE.reset(chat_type_token)
             _CURRENT_USER_ID.reset(user_token)
             _CURRENT_CHAT_ID.reset(chat_token)
 
 
 class ContextAwareAIProvider(AIProvider):
-    def __init__(self, base: AIProvider, stats_service: StatsService) -> None:
+    def __init__(
+        self,
+        base: AIProvider,
+        stats_service: StatsService,
+        owner_id: int | None = None,
+    ) -> None:
         self.base = base
         self.stats_service = stats_service
+        self.owner_id = owner_id
 
     async def ask_ai(self, text: str, user_name: str, reply_context: str = "") -> str:
         context = reply_context.strip()
+        style_context = self._conversation_style_context()
+        if style_context:
+            context = f"{style_context}\n{context}" if context else style_context
+
         memory = await self._recent_memory(text)
         if memory:
             memory_context = (
@@ -116,6 +129,10 @@ class ContextAwareAIProvider(AIProvider):
         reply_context: str = "",
     ) -> str:
         context = reply_context.strip()
+        style_context = self._conversation_style_context()
+        if style_context:
+            context = f"{style_context}\n{context}" if context else style_context
+
         memory = await self._recent_memory(caption or "media")
         if memory:
             memory_context = (
@@ -140,6 +157,24 @@ class ContextAwareAIProvider(AIProvider):
 
     async def vision_status(self) -> list[str]:
         return await self.base.vision_status()
+
+    def _conversation_style_context(self) -> str:
+        chat_type = _CURRENT_CHAT_TYPE.get()
+        user_id = _CURRENT_USER_ID.get()
+        if chat_type not in {"group", "supergroup"}:
+            return ""
+
+        if self.owner_id is not None and user_id == self.owner_id:
+            return (
+                "Guruh uslubi: current sender bot owneri. Unga 'sen' yoki 'siz' tabiiy chiqsa bo'ladi; "
+                "majburan rasmiylashtirma."
+            )
+
+        return (
+            "Guruh uslubi: current senderga doim hurmat bilan 'siz' deb murojaat qil. "
+            "'sen', 'senga', 'seni', 'sening', 'o'zing' kabi senlash shakllarini ishlatma; "
+            "mos ravishda 'siz', 'sizga', 'sizni', 'sizning', 'o'zingiz' shakllaridan foydalan."
+        )
 
     async def _recent_memory(self, query: str = "") -> str | None:
         chat_id = _CURRENT_CHAT_ID.get()
