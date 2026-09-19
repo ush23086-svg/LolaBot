@@ -678,9 +678,10 @@ class OpenRouterProvider(AIProvider):
 
 def build_ai_provider(settings: Settings) -> AIProvider:
     api_keys = settings.openrouter_api_key_slots
+    fallback: AIProvider
 
     if api_keys:
-        return OpenRouterProvider(
+        fallback = OpenRouterProvider(
             api_keys=api_keys,
             models=settings.openrouter_models,
             vision_models=settings.openrouter_vision_models,
@@ -688,8 +689,23 @@ def build_ai_provider(settings: Settings) -> AIProvider:
             reasoning_models=settings.openrouter_reasoning_models,
             app_name=settings.bot_name,
         )
+    else:
+        fallback = NullAIProvider()
 
-    return NullAIProvider()
+    if settings.ai_provider.strip().lower() == "antigravity":
+        from app.services.antigravity_provider import AntigravityProvider
+
+        return AntigravityProvider(
+            command=settings.antigravity_command,
+            model=settings.antigravity_model,
+            reasoning_model=settings.antigravity_reasoning_model,
+            timeout_seconds=settings.antigravity_timeout_seconds,
+            workdir=settings.antigravity_workdir,
+            home=settings.antigravity_home,
+            fallback=fallback,
+        )
+
+    return fallback
 
 
 def _normalize_key_slots(api_keys: list[str] | list[tuple[int, str]]) -> list[tuple[int, str]]:
