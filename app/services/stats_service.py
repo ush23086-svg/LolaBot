@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 import psycopg2
 from aiogram import Bot
+from aiogram.types import ReplyParameters
 from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,28 @@ class StatsService:
                     CREATE INDEX IF NOT EXISTS bot_conversation_turns_fts_idx
                     ON bot_conversation_turns
                     USING GIN (to_tsvector('simple', content));
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS reminders (
+                        id BIGSERIAL PRIMARY KEY,
+                        chat_id BIGINT NOT NULL,
+                        user_id BIGINT NOT NULL,
+                        source_message_id BIGINT NOT NULL,
+                        remind_at TIMESTAMPTZ NOT NULL,
+                        task TEXT NOT NULL,
+                        reminder_text TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        sent_at TIMESTAMPTZ
+                    );
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS reminders_due_idx
+                    ON reminders (remind_at)
+                    WHERE sent_at IS NULL;
                     """
                 )
                 cur.execute(
@@ -556,6 +579,80 @@ class StatsService:
 
         return "\n\n".join(sections)[:max_chars]
 
+    def create_reminder(
+        self,
+        chat_id: int,
+        user_id: int,
+        source_message_id: int,
+        remind_at: datetime,
+        task: str,
+        reminder_text: str,
+    ) -> int | None:
+        if not self.enabled:
+            return None
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO reminders (
+                        chat_id,
+                        user_id,
+                        source_message_id,
+                        remind_at,
+                        task,
+                        reminder_text
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING id;
+                    """,
+                    (
+                        chat_id,
+                        user_id,
+                        source_message_id,
+                        remind_at,
+                        task[:1000],
+                        reminder_text[:1000],
+                    ),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        return int(row["id"]) if row else None
+
+    def get_due_reminders(self, limit: int = 50) -> list[dict]:
+        if not self.enabled:
+            return []
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, chat_id, user_id, source_message_id, remind_at, task, reminder_text
+                    FROM reminders
+                    WHERE sent_at IS NULL AND remind_at <= NOW()
+                    ORDER BY remind_at ASC
+                    LIMIT %s;
+                    """,
+                    (max(1, min(int(limit), 200)),),
+                )
+                return list(cur.fetchall())
+
+    def mark_reminder_sent(self, reminder_id: int) -> None:
+        if not self.enabled:
+            return
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE reminders
+                    SET sent_at = NOW()
+                    WHERE id = %s AND sent_at IS NULL;
+                    """,
+                    (reminder_id,),
+                )
+            conn.commit()
+
     def update_memory(self, chat_id: int, user_id: int, summary: str) -> None:
         if not self.enabled or not summary.strip():
             return
@@ -683,6 +780,32 @@ def format_stats(title: str, total: int, rows: list[dict]) -> str:
     for index, row in enumerate(rows[:3]):
         text += f"{medals[index]} {row['user_name']} ({row['count']} ta)\n"
     return text
+
+
+async def send_due_reminders(bot: Bot, stats_service: StatsService) -> None:
+    while True:
+        try:
+            rows = await asyncio.to_thread(stats_service.get_due_reminders, 50)
+        except Exception:
+            logger.exception("Failed to fetch due reminders")
+            await asyncio.sleep(15)
+            continue
+
+        for row in rows:
+            try:
+                await bot.send_message(
+                    chat_id=int(row["chat_id"]),
+                    text=str(row["reminder_text"]),
+                    reply_parameters=ReplyParameters(
+                        message_id=int(row["source_message_id"]),
+                        allow_sending_without_reply=True,
+                    ),
+                )
+                await asyncio.to_thread(stats_service.mark_reminder_sent, int(row["id"]))
+            except Exception:
+                logger.exception("Failed to send reminder id=%s", row.get("id"))
+
+        await asyncio.sleep(10)
 
 
 async def send_daily_reports(bot: Bot, stats_service: StatsService) -> None:
