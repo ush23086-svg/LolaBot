@@ -12,6 +12,7 @@ from pathlib import Path
 from app.services.ai_provider import (
     AIProvider,
     AI_ERROR_MESSAGE,
+    IMAGE_ERROR_MESSAGE,
     GeneratedImage,
     SYSTEM_PROMPT,
     UNCLEAR_MEDIA_REPLY,
@@ -107,7 +108,10 @@ class AntigravityProvider(AIProvider):
                 return _sanitize_user_name_leak(answer, user_name)
 
         logger.warning("Antigravity vision failed; falling back to secondary provider")
-        return await self.fallback.analyze_image(image_base64, user_name, caption, reply_context)
+        fallback_answer = await self.fallback.analyze_image(image_base64, user_name, caption, reply_context)
+        if fallback_answer == IMAGE_ERROR_MESSAGE:
+            return UNCLEAR_MEDIA_REPLY
+        return fallback_answer
 
     async def generate_image(self, prompt: str, user_name: str) -> GeneratedImage:
         return await self.fallback.generate_image(prompt, user_name)
