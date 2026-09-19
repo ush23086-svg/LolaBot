@@ -119,6 +119,26 @@ class StatsService:
                 )
                 cur.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS owner_global_memory (
+                        id BIGSERIAL PRIMARY KEY,
+                        owner_id BIGINT NOT NULL,
+                        category TEXT NOT NULL CHECK (category IN ('personal', 'group_rule')),
+                        content TEXT NOT NULL,
+                        source_chat_id BIGINT,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        UNIQUE(owner_id, category, content)
+                    );
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS owner_global_memory_lookup_idx
+                    ON owner_global_memory (owner_id, category, updated_at DESC);
+                    """
+                )
+                cur.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS bot_usage_limits (
                         chat_id BIGINT NOT NULL,
                         user_id BIGINT NOT NULL,
@@ -587,6 +607,91 @@ class StatsService:
             return None
 
         return "\n\n".join(sections)[:max_chars]
+
+    def save_owner_global_memory(
+        self,
+        owner_id: int,
+        category: str,
+        content: str,
+        source_chat_id: int | None = None,
+    ) -> None:
+        if not self.enabled:
+            return
+        if category not in {"personal", "group_rule"}:
+            return
+
+        clean = " ".join((content or "").split()).strip()
+        if not clean:
+            return
+        clean = clean[:600]
+        keep_limit = 20 if category == "personal" else 12
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO owner_global_memory (owner_id, category, content, source_chat_id)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (owner_id, category, content)
+                    DO UPDATE SET updated_at = NOW(), source_chat_id = EXCLUDED.source_chat_id;
+                    """,
+                    (owner_id, category, clean, source_chat_id),
+                )
+                cur.execute(
+                    """
+                    DELETE FROM owner_global_memory
+                    WHERE owner_id = %s
+                      AND category = %s
+                      AND id NOT IN (
+                          SELECT id
+                          FROM owner_global_memory
+                          WHERE owner_id = %s AND category = %s
+                          ORDER BY updated_at DESC, id DESC
+                          LIMIT %s
+                      );
+                    """,
+                    (owner_id, category, owner_id, category, keep_limit),
+                )
+            conn.commit()
+
+    def get_owner_global_memory(
+        self,
+        owner_id: int,
+        categories: tuple[str, ...] = ("personal",),
+        max_chars: int = 2400,
+    ) -> str | None:
+        if not self.enabled:
+            return None
+
+        clean_categories = tuple(
+            category for category in categories if category in {"personal", "group_rule"}
+        )
+        if not clean_categories:
+            return None
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT category, content, updated_at
+                    FROM owner_global_memory
+                    WHERE owner_id = %s AND category = ANY(%s)
+                    ORDER BY updated_at DESC, id DESC
+                    LIMIT 24;
+                    """,
+                    (owner_id, list(clean_categories)),
+                )
+                rows = list(cur.fetchall())
+
+        if not rows:
+            return None
+
+        labels = {"personal": "Shaxsiy", "group_rule": "Guruh qoidasi"}
+        lines = [
+            f"- {labels.get(str(row['category']), 'Xotira')}: {str(row['content'])[:600]}"
+            for row in rows
+        ]
+        return "\n".join(lines)[:max_chars]
 
     def create_reminder(
         self,
