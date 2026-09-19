@@ -139,6 +139,32 @@ class StatsService:
                 )
                 cur.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS group_member_last_messages (
+                        chat_id BIGINT NOT NULL,
+                        user_id BIGINT NOT NULL,
+                        display_name TEXT NOT NULL,
+                        username TEXT,
+                        last_message_id BIGINT NOT NULL,
+                        last_text TEXT,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        PRIMARY KEY(chat_id, user_id)
+                    );
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS group_member_last_messages_name_idx
+                    ON group_member_last_messages (chat_id, lower(display_name));
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS group_member_last_messages_username_idx
+                    ON group_member_last_messages (chat_id, lower(username));
+                    """
+                )
+                cur.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS bot_usage_limits (
                         chat_id BIGINT NOT NULL,
                         user_id BIGINT NOT NULL,
@@ -197,6 +223,94 @@ class StatsService:
                     (chat_id, user_id, user_name, today_key()),
                 )
             conn.commit()
+
+    def track_group_member_message(
+        self,
+        chat_id: int,
+        user_id: int,
+        display_name: str,
+        username: str | None,
+        message_id: int,
+        text: str | None = None,
+    ) -> None:
+        if not self.enabled:
+            return
+
+        clean_name = (display_name or str(user_id)).strip()[:200]
+        clean_username = (username or "").strip().lstrip("@")[:100] or None
+        clean_text = (text or "").strip()[:500] or None
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO group_member_last_messages (
+                        chat_id, user_id, display_name, username, last_message_id, last_text, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                    ON CONFLICT (chat_id, user_id)
+                    DO UPDATE SET
+                        display_name = EXCLUDED.display_name,
+                        username = EXCLUDED.username,
+                        last_message_id = EXCLUDED.last_message_id,
+                        last_text = EXCLUDED.last_text,
+                        updated_at = NOW();
+                    """,
+                    (chat_id, user_id, clean_name, clean_username, message_id, clean_text),
+                )
+            conn.commit()
+
+    def find_group_members(self, chat_id: int, name: str, limit: int = 5) -> list[dict]:
+        if not self.enabled:
+            return []
+
+        query = (name or "").strip().lstrip("@")
+        if not query:
+            return []
+
+        contains = f"%{query}%"
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        chat_id,
+                        user_id,
+                        display_name,
+                        username,
+                        last_message_id,
+                        last_text,
+                        updated_at,
+                        CASE
+                            WHEN lower(COALESCE(username, '')) = lower(%s) THEN 0
+                            WHEN lower(display_name) = lower(%s) THEN 1
+                            WHEN lower(COALESCE(username, '')) LIKE lower(%s) THEN 2
+                            ELSE 3
+                        END AS match_rank
+                    FROM group_member_last_messages
+                    WHERE chat_id = %s
+                      AND (
+                          lower(COALESCE(username, '')) = lower(%s)
+                          OR lower(display_name) = lower(%s)
+                          OR lower(COALESCE(username, '')) LIKE lower(%s)
+                          OR lower(display_name) LIKE lower(%s)
+                      )
+                    ORDER BY match_rank ASC, updated_at DESC
+                    LIMIT %s;
+                    """,
+                    (
+                        query,
+                        query,
+                        contains,
+                        chat_id,
+                        query,
+                        query,
+                        contains,
+                        contains,
+                        max(1, min(int(limit), 10)),
+                    ),
+                )
+                return list(cur.fetchall())
 
     def use_bot_quota(self, chat_id: int, user_id: int, chat_type: str) -> tuple[bool, int, int]:
         if not self.enabled:
