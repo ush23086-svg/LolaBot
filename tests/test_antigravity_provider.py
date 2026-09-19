@@ -1,9 +1,10 @@
+import tempfile
 import unittest
 from unittest.mock import AsyncMock
 
 from app.config import Settings
 from app.services.ai_provider import AIProvider, GeneratedImage, build_ai_provider
-from app.services.antigravity_provider import AntigravityProvider
+from app.services.antigravity_provider import AntigravityProvider, _decode_media_item
 
 
 class StubProvider(AIProvider):
@@ -70,13 +71,34 @@ class AntigravityProviderTest(unittest.IsolatedAsyncioTestCase):
             [("Salom", "Tester", "oldingi kontekst")],
         )
 
-    async def test_vision_stays_on_existing_fallback(self):
+    async def test_antigravity_vision_is_primary(self):
         provider, fallback = self.make_provider()
+        provider._run = AsyncMock(return_value="Rasmda test yozuvi bor")
+
+        answer = await provider.analyze_image("aW1hZ2U=", "Tester", caption="Nima bor?")
+
+        self.assertEqual(answer, "Rasmda test yozuvi bor")
+        self.assertEqual(fallback.vision_calls, 0)
+        prompt = provider._run.await_args.args[0]
+        self.assertIn("Media fayllari:", prompt)
+        self.assertIn("Nima bor?", prompt)
+
+    async def test_antigravity_vision_falls_back_if_media_run_fails(self):
+        provider, fallback = self.make_provider()
+        provider._run = AsyncMock(return_value=None)
 
         answer = await provider.analyze_image("aW1hZ2U=", "Tester")
 
         self.assertEqual(answer, "vision fallback")
         self.assertEqual(fallback.vision_calls, 1)
+
+    def test_decode_media_data_url(self):
+        decoded = _decode_media_item("data:image/png;base64,aW1hZ2U=")
+
+        self.assertIsNotNone(decoded)
+        data, suffix = decoded
+        self.assertEqual(data, b"image")
+        self.assertEqual(suffix, ".png")
 
     def test_build_provider_can_select_antigravity(self):
         settings = Settings(
