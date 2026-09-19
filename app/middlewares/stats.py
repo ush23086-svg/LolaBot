@@ -36,8 +36,32 @@ class StatsMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         if isinstance(event, Message):
+            await self._track_group_member(event)
             await self._count_group_message(event, data)
         return await handler(event, data)
+
+    async def _track_group_member(self, message: Message) -> None:
+        if message.chat.type == "private" or not self.stats_service.enabled:
+            return
+
+        user = message.from_user
+        if not user or user.is_bot:
+            return
+
+        display_name = user.full_name or user.username or str(user.id)
+        text = message.text or message.caption or ""
+        try:
+            await asyncio.to_thread(
+                self.stats_service.track_group_member_message,
+                message.chat.id,
+                user.id,
+                display_name,
+                user.username,
+                message.message_id,
+                text,
+            )
+        except Exception:
+            logger.exception("Failed to track latest group message for chat %s", message.chat.id)
 
     async def _count_group_message(self, message: Message, data: dict[str, Any]) -> None:
         if message.chat.type == "private":
