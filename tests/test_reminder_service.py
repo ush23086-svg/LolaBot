@@ -19,7 +19,7 @@ class ReminderParserTest(unittest.TestCase):
         self.assertIsNotNone(reminder)
         self.assertEqual(reminder.remind_at, datetime(2026, 9, 20, 10, 0, tzinfo=TZ))
         self.assertEqual(reminder.task, "dori ichishni")
-        self.assertEqual(reminder.reminder_text, "Doringni ich 💊")
+        self.assertEqual(reminder.reminder_text, "Doringni ich")
         self.assertEqual(reminder.day_label, "ertaga")
 
     def test_supports_soat_and_single_hour(self):
