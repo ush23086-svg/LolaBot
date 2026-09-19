@@ -11,7 +11,7 @@ from app.middlewares.stats import StatsMiddleware
 from app.runtime_fixes import ContextAwareAIProvider, LolaContextMiddleware, SafeStatsService
 from app.services.ai_provider import build_ai_provider
 from app.services.meta_engine import CodmunityClient
-from app.services.stats_service import send_daily_reports
+from app.services.stats_service import send_daily_reports, send_due_reminders
 
 logger = logging.getLogger(__name__)
 
@@ -45,4 +45,5 @@ async def main() -> None:
     await bot.delete_webhook(drop_pending_updates=True)
     if stats_service.enabled:
         asyncio.create_task(send_daily_reports(bot, stats_service))
+        asyncio.create_task(send_due_reminders(bot, stats_service))
     await dp.start_polling(bot)
