@@ -3,6 +3,7 @@ import unittest
 from app.runtime_fixes import (
     ContextAwareAIProvider,
     _CURRENT_CHAT_ID,
+    _CURRENT_CHAT_TYPE,
     _CURRENT_USER_ID,
     strip_generic_help_ending,
 )
@@ -74,6 +75,38 @@ class RuntimeFixesTest(unittest.IsolatedAsyncioTestCase):
 
     def test_generic_only_reply_becomes_neutral(self):
         self.assertEqual(strip_generic_help_ending("Sizga qanday yordam beray?"), "Tushundim 🙂")
+
+    async def test_group_member_gets_siz_style_context(self):
+        base = FakeProvider("Mayli.")
+        stats = FakeStatsService()
+        provider = ContextAwareAIProvider(base, stats, owner_id=999)
+        chat_token = _CURRENT_CHAT_ID.set(-1001)
+        user_token = _CURRENT_USER_ID.set(77)
+        type_token = _CURRENT_CHAT_TYPE.set("supergroup")
+        try:
+            await provider.ask_ai("salom", "Tester")
+        finally:
+            _CURRENT_CHAT_TYPE.reset(type_token)
+            _CURRENT_USER_ID.reset(user_token)
+            _CURRENT_CHAT_ID.reset(chat_token)
+
+        self.assertIn("doim hurmat bilan 'siz'", base.reply_context)
+
+    async def test_owner_can_keep_natural_sen_style_in_group(self):
+        base = FakeProvider("Mayli.")
+        stats = FakeStatsService()
+        provider = ContextAwareAIProvider(base, stats, owner_id=77)
+        chat_token = _CURRENT_CHAT_ID.set(-1001)
+        user_token = _CURRENT_USER_ID.set(77)
+        type_token = _CURRENT_CHAT_TYPE.set("supergroup")
+        try:
+            await provider.ask_ai("salom", "Tester")
+        finally:
+            _CURRENT_CHAT_TYPE.reset(type_token)
+            _CURRENT_USER_ID.reset(user_token)
+            _CURRENT_CHAT_ID.reset(chat_token)
+
+        self.assertIn("bot owneri", base.reply_context)
 
     async def test_recent_memory_is_injected_and_tail_is_removed(self):
         base = FakeProvider("Davom etamiz. Yana nimada yordam beray?")
