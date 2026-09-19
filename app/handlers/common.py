@@ -162,10 +162,11 @@ def _is_exact_lola_wakeup(text: str) -> bool:
 
 
 def _wakeup_key(message: Message) -> tuple[int, int] | None:
-    user = message.from_user
-    if not user or message.chat.type == "private":
+    user = getattr(message, "from_user", None)
+    chat = getattr(message, "chat", None)
+    if not user or not chat or getattr(chat, "type", None) == "private":
         return None
-    return int(message.chat.id), int(user.id)
+    return int(chat.id), int(user.id)
 
 
 def _open_wakeup_window(message: Message) -> None:
