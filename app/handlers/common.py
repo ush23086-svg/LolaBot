@@ -25,6 +25,7 @@ from aiogram.types import (
 
 from app.config import Settings
 from app.services.ai_provider import AIProvider, IMAGE_ERROR_MESSAGE
+from app.services.reminder_service import parse_reminder_request
 from app.services.meta_engine import (
     CHECKER_FAIL_MESSAGE,
     CodmunityClient,
@@ -48,6 +49,8 @@ logger = logging.getLogger(__name__)
 TELEGRAM_TEXT_LIMIT = 4096
 CHAT_DATA: dict[int, dict] = {}
 META_CONTEXT_TTL_SECONDS = 15 * 60
+LOLA_WAKEUP_TTL_SECONDS = 2 * 60
+LOLA_WAKEUP_WINDOWS: dict[tuple[int, int], float] = {}
 
 VIDEO_FILENAME = "SaveVid_Net_AQNKnUIQh4au0ukBFQeeBEE9GNtzkOFvNFXUDTipfHHr9qwI5m8RUCHhFxyUIY.mp4"
 VIDEO_SONG2_FILENAME = "video_2026-05-31_21-36-53.mp4"
@@ -158,6 +161,28 @@ def _is_exact_lola_wakeup(text: str) -> bool:
     return bool(re.fullmatch(r"lo+la+", normalize_text(text)))
 
 
+def _wakeup_key(message: Message) -> tuple[int, int] | None:
+    user = message.from_user
+    if not user or message.chat.type == "private":
+        return None
+    return int(message.chat.id), int(user.id)
+
+
+def _open_wakeup_window(message: Message) -> None:
+    key = _wakeup_key(message)
+    if key is None:
+        return
+    LOLA_WAKEUP_WINDOWS[key] = time.monotonic() + LOLA_WAKEUP_TTL_SECONDS
+
+
+def _consume_wakeup_window(message: Message) -> bool:
+    key = _wakeup_key(message)
+    if key is None:
+        return False
+    expires_at = LOLA_WAKEUP_WINDOWS.pop(key, None)
+    return bool(expires_at and expires_at >= time.monotonic())
+
+
 def _lola_wakeup_reply() -> str:
     global _LAST_LOLA_WAKEUP_REPLY
     choices = [reply for reply in LOLA_WAKEUP_REPLIES if reply != _LAST_LOLA_WAKEUP_REPLY]
@@ -209,6 +234,14 @@ async def _should_answer_text(message: Message, bot: Bot) -> bool:
     if is_reply_to_bot:
         logger.info(
             "text_handler_decision chat_type=%s chat_id=%s reason=reply_to_bot_continue",
+            message.chat.type,
+            message.chat.id,
+        )
+        return True
+
+    if _consume_wakeup_window(message):
+        logger.info(
+            "text_handler_decision chat_type=%s chat_id=%s reason=wakeup_followup_continue",
             message.chat.type,
             message.chat.id,
         )
@@ -1609,11 +1642,47 @@ async def text_handler(
                 message.chat.type,
                 message.chat.id,
             )
+            _open_wakeup_window(message)
         await message.reply(_lola_wakeup_reply())
         return
 
     if not await _should_answer_text(message, bot):
         return
+
+    reminder = parse_reminder_request(text)
+    if reminder is not None:
+        user = message.from_user
+        if not user:
+            return
+        if not stats_service.enabled:
+            await message.reply("Eslatmalar uchun xotira bazasi ulanmagan.")
+            return
+
+        reminder_id = await asyncio.to_thread(
+            stats_service.create_reminder,
+            message.chat.id,
+            user.id,
+            message.message_id,
+            reminder.remind_at,
+            reminder.task,
+            reminder.reminder_text,
+        )
+        if reminder_id is None:
+            await message.reply("Eslatmani saqlay olmadim.")
+            return
+
+        await message.reply(
+            f"Eslab qoldim 😄 {reminder.day_label} "
+            f"{reminder.remind_at.strftime('%H:%M')} da eslataman."
+        )
+        await _save_memory(
+            message,
+            stats_service,
+            text,
+            f"Eslatma qo'yildi: {reminder.day_label} {reminder.remind_at.strftime('%H:%M')} - {reminder.task}",
+        )
+        return
+
     if not await _check_usage_limit(message, stats_service):
         return
 
