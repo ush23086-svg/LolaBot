@@ -1012,6 +1012,18 @@ async def _save_memory(message: Message, stats_service: StatsService, user_text:
         return
 
     try:
+        saver = getattr(stats_service, "save_exchange", None)
+        if callable(saver):
+            await asyncio.to_thread(
+                saver,
+                message.chat.id,
+                user.id,
+                user_text,
+                answer,
+                _memory_summary(user_text, answer),
+            )
+            return
+
         await asyncio.to_thread(
             stats_service.update_memory,
             message.chat.id,
