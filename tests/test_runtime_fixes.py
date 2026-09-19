@@ -34,8 +34,15 @@ class FakeProvider(AIProvider):
 class FakeStatsService:
     enabled = True
 
+    def __init__(self) -> None:
+        self.last_query = ""
+
     def get_memory(self, chat_id: int, user_id: int) -> str | None:
         return f"memory:{chat_id}:{user_id}"
+
+    def get_memory_context(self, chat_id: int, user_id: int, query: str = "") -> str | None:
+        self.last_query = query
+        return f"memory:{chat_id}:{user_id}:{query}"
 
 
 class RuntimeFixesTest(unittest.IsolatedAsyncioTestCase):
@@ -70,7 +77,8 @@ class RuntimeFixesTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_recent_memory_is_injected_and_tail_is_removed(self):
         base = FakeProvider("Davom etamiz. Yana nimada yordam beray?")
-        provider = ContextAwareAIProvider(base, FakeStatsService())
+        stats = FakeStatsService()
+        provider = ContextAwareAIProvider(base, stats)
         chat_token = _CURRENT_CHAT_ID.set(-1001)
         user_token = _CURRENT_USER_ID.set(77)
         try:
@@ -80,8 +88,9 @@ class RuntimeFixesTest(unittest.IsolatedAsyncioTestCase):
             _CURRENT_CHAT_ID.reset(chat_token)
 
         self.assertEqual(answer, "Davom etamiz.")
-        self.assertIn("memory:-1001:77", base.reply_context)
+        self.assertIn("memory:-1001:77:davom et", base.reply_context)
         self.assertIn("reply context", base.reply_context)
+        self.assertEqual(stats.last_query, "davom et")
 
 
 if __name__ == "__main__":
