@@ -100,6 +100,14 @@ MEMORY_RE = re.compile(
     r"(kecha|oldin|avval).*(nima|gaplash|yozish)|nimani gaplashdik",
     re.IGNORECASE,
 )
+OWNER_MEMORY_RE = re.compile(
+    r"\b(eslab\s+qol|bundan\s+keyin|har\s+doim|doim)\b",
+    re.IGNORECASE,
+)
+OWNER_GROUP_RULE_RE = re.compile(
+    r"\b(guruhda|hammaga|hammani|siz\s+de|sen\s+de|sizlab|senlab)\b",
+    re.IGNORECASE,
+)
 META_LIST_LINE_RE = re.compile(r"^\s*(\d{1,2})\.\s+(.+?)(?:\s+-\s+(.+?))?(?:\s+-\s+(\d+(?:\.\d+)?%))?\s*$")
 META_SELECTION_WORDS = {
     "birinchi": 1,
