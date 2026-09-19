@@ -97,10 +97,10 @@ class ContextAwareAIProvider(AIProvider):
 
     async def ask_ai(self, text: str, user_name: str, reply_context: str = "") -> str:
         context = reply_context.strip()
-        memory = await self._recent_memory()
+        memory = await self._recent_memory(text)
         if memory:
             memory_context = (
-                "Oxirgi suhbat konteksti (faqat davomiylik uchun; userning yangi xabari ustun): "
+                "Lola xotirasi (davomiylik uchun; userning yangi xabari har doim ustun):\n"
                 f"{memory}"
             )
             context = f"{memory_context}\n{context}" if context else memory_context
@@ -115,11 +115,20 @@ class ContextAwareAIProvider(AIProvider):
         caption: str = "",
         reply_context: str = "",
     ) -> str:
+        context = reply_context.strip()
+        memory = await self._recent_memory(caption or "media")
+        if memory:
+            memory_context = (
+                "Lola xotirasi (media savolini tushunish uchun; yangi caption/reply ustun):\n"
+                f"{memory}"
+            )
+            context = f"{memory_context}\n{context}" if context else memory_context
+
         answer = await self.base.analyze_image(
             image_base64=image_base64,
             user_name=user_name,
             caption=caption,
-            reply_context=reply_context,
+            reply_context=context,
         )
         return strip_generic_help_ending(answer)
 
@@ -132,12 +141,15 @@ class ContextAwareAIProvider(AIProvider):
     async def vision_status(self) -> list[str]:
         return await self.base.vision_status()
 
-    async def _recent_memory(self) -> str | None:
+    async def _recent_memory(self, query: str = "") -> str | None:
         chat_id = _CURRENT_CHAT_ID.get()
         user_id = _CURRENT_USER_ID.get()
         if chat_id is None or user_id is None or not self.stats_service.enabled:
             return None
         try:
+            getter = getattr(self.stats_service, "get_memory_context", None)
+            if callable(getter):
+                return await asyncio.to_thread(getter, chat_id, user_id, query)
             return await asyncio.to_thread(self.stats_service.get_memory, chat_id, user_id)
         except Exception:
             return None
