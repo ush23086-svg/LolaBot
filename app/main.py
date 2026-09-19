@@ -34,7 +34,11 @@ async def main() -> None:
         logger.exception("Failed to initialize stats database")
 
     base_ai_provider = build_ai_provider(settings)
-    dp["ai_provider"] = ContextAwareAIProvider(base_ai_provider, stats_service)
+    dp["ai_provider"] = ContextAwareAIProvider(
+        base_ai_provider,
+        stats_service,
+        owner_id=settings.owner_id,
+    )
     dp["codmunity_client"] = CodmunityClient(timeout=settings.codmunity_timeout)
     dp["stats_service"] = stats_service
     dp["settings"] = settings
