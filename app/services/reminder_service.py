@@ -82,5 +82,5 @@ def _extract_task(text: str) -> str:
 def _reminder_text(task: str) -> str:
     lowered = task.lower().replace("‘", "'").replace("’", "'")
     if "dori" in lowered and "ich" in lowered:
-        return "Doringni ich 💊"
+        return "Doringni ich"
     return f"Eslatma: {task}"
