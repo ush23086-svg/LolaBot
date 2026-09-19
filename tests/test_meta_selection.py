@@ -22,6 +22,8 @@ from app.handlers.common import (
     _should_answer_text,
     _user_label,
     _meta_contexts,
+    _owner_global_memory_candidate,
+    _parse_owner_group_reply_action,
     _meta_weapons_from_context,
     _reply_meta_weapons,
     _save_meta_context,
@@ -183,6 +185,38 @@ def fake_user_message(user_id=1, first_name=None, username=None, full_name=None)
             full_name=full_name,
         )
     )
+
+
+class OwnerGroupActionParserTest(unittest.TestCase):
+    def test_parses_latest_group_reply_action(self):
+        self.assertEqual(
+            _parse_owner_group_reply_action(
+                "Sanjarga guruhda Sanjar ohirgi yozganiga Reply qilib Sanjar qalaysan deb yozolasami"
+            ),
+            ("Sanjar", "Sanjar qalaysan"),
+        )
+
+    def test_parses_groupdagi_variant(self):
+        self.assertEqual(
+            _parse_owner_group_reply_action(
+                'Sanjarning guruhdagi oxirgi xabariga reply qilib "qalaysan" deb yoz'
+            ),
+            ("Sanjar", "qalaysan"),
+        )
+
+    def test_one_time_group_action_is_not_saved_as_group_rule(self):
+        self.assertIsNone(
+            _owner_global_memory_candidate(
+                "guruhda Sanjar oxirgi yozganiga reply qilib qalaysan deb yoz"
+            )
+        )
+
+    def test_explicit_group_rule_is_still_saved(self):
+        candidate = _owner_global_memory_candidate(
+            "eslab qol: guruhda Sanjarga sen de, qolganlarga siz de"
+        )
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate[0], "group_rule")
 
 
 class MetaSelectionTest(unittest.TestCase):
