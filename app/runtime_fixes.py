@@ -107,6 +107,10 @@ class ContextAwareAIProvider(AIProvider):
 
     async def ask_ai(self, text: str, user_name: str, reply_context: str = "") -> str:
         context = reply_context.strip()
+        global_memory = await self._global_owner_context()
+        if global_memory:
+            context = f"{global_memory}\n{context}" if context else global_memory
+
         style_context = self._conversation_style_context()
         if style_context:
             context = f"{style_context}\n{context}" if context else style_context
@@ -130,6 +134,10 @@ class ContextAwareAIProvider(AIProvider):
         reply_context: str = "",
     ) -> str:
         context = reply_context.strip()
+        global_memory = await self._global_owner_context()
+        if global_memory:
+            context = f"{global_memory}\n{context}" if context else global_memory
+
         style_context = self._conversation_style_context()
         if style_context:
             context = f"{style_context}\n{context}" if context else style_context
@@ -172,9 +180,45 @@ class ContextAwareAIProvider(AIProvider):
             )
 
         return (
-            "Guruh uslubi: current senderga doim hurmat bilan 'siz' deb murojaat qil. "
-            "'sen', 'senga', 'seni', 'sening', 'o'zing' kabi senlash shakllarini ishlatma; "
-            "mos ravishda 'siz', 'sizga', 'sizni', 'sizning', 'o'zingiz' shakllaridan foydalan."
+            "Guruh uslubi: owner belgilagan aniq guruh qoidasi bo'lsa, o'sha qoida ustun. "
+            "Aks holda current senderga hurmat bilan 'siz' deb murojaat qil."
+        )
+
+    async def _global_owner_context(self) -> str | None:
+        if self.owner_id is None or not self.stats_service.enabled:
+            return None
+
+        chat_type = _CURRENT_CHAT_TYPE.get()
+        user_id = _CURRENT_USER_ID.get()
+        if user_id is None:
+            return None
+
+        if int(user_id) == int(self.owner_id):
+            categories = ("personal", "group_rule")
+        elif chat_type in {"group", "supergroup"}:
+            categories = ("group_rule",)
+        else:
+            return None
+
+        getter = getattr(self.stats_service, "get_owner_global_memory", None)
+        if not callable(getter):
+            return None
+
+        try:
+            memory = await asyncio.to_thread(
+                getter,
+                int(self.owner_id),
+                categories,
+            )
+        except Exception:
+            return None
+
+        if not memory:
+            return None
+        return (
+            "Owner global xotirasi va guruh qoidalari. Faqat mos vaziyatda ishlat; "
+            "ownerning shaxsiy faktlarini boshqa userga oshkor qilma:\n"
+            f"{memory}"
         )
 
     async def _recent_memory(self, query: str = "") -> str | None:
