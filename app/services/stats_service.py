@@ -15,9 +15,15 @@ TZ = ZoneInfo("Asia/Tashkent")
 
 
 class StatsService:
-    def __init__(self, database_url: str | None, main_group_id: int | None = None) -> None:
+    def __init__(
+        self,
+        database_url: str | None,
+        main_group_id: int | None = None,
+        owner_id: int | None = None,
+    ) -> None:
         self.database_url = database_url
         self.main_group_id = main_group_id
+        self.owner_id = owner_id
 
     @property
     def enabled(self) -> bool:
@@ -174,6 +180,9 @@ class StatsService:
 
     def use_bot_quota(self, chat_id: int, user_id: int, chat_type: str) -> tuple[bool, int, int]:
         if not self.enabled:
+            return True, 0, 0
+
+        if self.owner_id is not None and int(user_id) == int(self.owner_id):
             return True, 0, 0
 
         if chat_type != "private" and self.main_group_id is not None and int(chat_id) == int(self.main_group_id):
