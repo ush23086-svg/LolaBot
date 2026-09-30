@@ -8,6 +8,7 @@ LolaBot - Telegram uchun o'zbekcha yordamchi bot. Bot `aiogram` bilan ishlaydi, 
 - OpenRouter API orqali free text modeliga ulanadi.
 - `OPENROUTER_API_KEY_1/2/3/4/5` bo'yicha key rotation ishlaydi.
 - Oddiy chat `CHAT_MODEL` orqali ishlaydi.
+- Oddiy chatga OpenRouter server-side `web_search` va `web_fetch` tool'lari beriladi; model kerak bo'lganda internetdan real natija va link topadi.
 - `CHAT_MODEL` limit yoki provider xatosiga tushsa `FALLBACK_MODEL` ishlaydi.
 - Rasmda `VISION_MODEL` va `OPENROUTER_VISION_MODELS` fallback ro'yxati ishlaydi.
 - Matematika va murakkab reasoning savollar `REASONING_MODEL` orqali ishlaydi.
