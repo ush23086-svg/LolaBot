@@ -53,6 +53,7 @@ class FakeSession:
                 "authorization": self.headers.get("Authorization", ""),
                 "model": json.get("model"),
                 "content": json.get("messages", [{}])[-1].get("content"),
+                "tools": json.get("tools"),
             }
         )
         if not FakeSession.responses:
@@ -144,6 +145,26 @@ class OpenRouterProviderTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [attempt["authorization"] for attempt in FakeSession.attempts],
             ["Bearer secret-key-1", "Bearer secret-key-1"],
+        )
+
+    async def test_chat_exposes_agentic_web_search_and_fetch_tools(self):
+        FakeSession.responses = [
+            FakeResponse(200, {"choices": [{"message": {"content": "topdim"}}]}),
+        ]
+        provider = OpenRouterProvider(
+            api_keys=[(1, "secret-key-1")],
+            models=["chat-model"],
+            vision_models=[],
+            image_models=[],
+            app_name="Lola",
+        )
+
+        answer = await provider.ask_ai("YouTube'dan shu videoni topib linkini ber", "Tester")
+
+        self.assertEqual(answer, "topdim")
+        self.assertEqual(
+            [tool["type"] for tool in FakeSession.attempts[0]["tools"]],
+            ["openrouter:web_search", "openrouter:web_fetch"],
         )
 
     async def test_reasoning_request_uses_reasoning_model(self):
